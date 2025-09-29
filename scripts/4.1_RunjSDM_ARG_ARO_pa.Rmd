@@ -1,0 +1,1702 @@
+---
+title: "4 - Mice ARGs - jSDM"
+author: "Morgane Gicquel"
+date: "2025-08-05"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+*******************RUN PARALLEL IN CS1************************************
+01.09.2024 This code is only for the IZW CS1 server, so the parallelizing works, until next server update.
+```{r}
+#install.packages("RhpcBLASctl")
+library('RhpcBLASctl')
+omp_set_num_threads(1)
+blas_set_num_threads(1)
+Sys.setenv(NUMEXPR_NUM_THREADS = 1,
+           OPENBLAS_NUM_THREADS = 1,
+           VECLIB_MAXIMUM_THREADS = 1,
+           BLIS_NUM_THREADS = 1,
+           OMP_NUM_THREADS = 1, 
+           MKL_NUM_THREADS = 1)
+```
+***************************************************************************
+
+# Model structure 
+
+We have a total 340 different antibiotic resistant genes found in the samples.  
+
+Response variable: presence / absence of each ARG in mice gut microbiome. 
+
+Explanatory variables:  
+- Mouse characteristics: sex, BMI   
+- Mouse density: Ntrapped  
+- Landcover: imperv, tcd, swf_perc, agri    
+- Accessibility: dist_road, dist_path
+- Farm animals: cat_dens, pig_dens, pou_dens  
+- Climatic: precipitation_aug, air_temp_aug  
+
+Random:  
+- Spatial autocorrelation (longitude and latitude)
+- Farm ID
+- Year  
+
+Traits:  
+- Localization  
+- Mobility  
+- Drug class  
+- Resistance mechanism
+
+
+## Preparing workspace
+```{r prepare workspace}
+#setwd("/mnt/dep6/gicquel/mus_musculus_de_amr_gicquel_m/")
+
+# Indicate date of the current run
+date <- "2025-07-18"
+
+# Loading packages needed, as well as custom ggplot themes
+source("scripts/source_packages.R") # R libraries
+source("scripts/source_themes_mg.R")
+
+# Setting working and output directories 
+wrkdir <- getwd()
+model_wd <- paste0(wrkdir, "/output/jSDM_ARG_aro_pa_", date)
+```
+
+## Loading data
+
+### Mice data with associated environmental covariates
+```{r}
+# mice related data
+mice_data <- read.csv("./data/processed/Table_ARG_mice_envcov_100m_202507.csv")
+head(mice_data)
+table(mice_data$year)
+
+# removing samples with missing information on sex of mice
+mice_data <- mice_data %>%
+  filter(sex != "") 
+
+```
+
+### Traits data
+
+```{r}
+# traits data
+arg_trait <- read.csv("./data/processed/arg_trait.csv")
+head(arg_trait)
+
+```
+
+
+### ARGs data
+Loading the data with ARGs community for each sample.
+
+```{r}
+# ARG bacteria data
+PS.ARG.raw_jS <- readRDS("./data/processed/PS.ARG.raw.filt_jS.rds")
+PS.ARG.raw_jS <- PS.ARG.raw_jS %>%
+  subset_samples(., sex != "")
+
+sample_data(PS.ARG.raw_jS@sam_data)
+
+# Change order of taxa
+
+new_tax <- data.frame(PS.ARG.raw_jS@tax_table) %>%
+  mutate(ARO = rownames(.)) %>%
+  dplyr::select(ARO, ARG_CARD_Short, AMR_gene_family, Resistance_Mechanism, Variant)
+  
+PS.ARG.raw_jS@tax_table <- tax_table(as.matrix(new_tax))
+
+## get data at family level
+PS_ARG_fam <- tax_glom(PS.ARG.raw_jS, taxrank = "ARG_CARD_Short")
+PS_ARG_fam
+
+#View(tax_table(PS_ARG_fam))
+
+unique(data.frame(PS_ARG_fam@tax_table)$ARG_CARD_Short)
+
+## 98 ARG AMR gene family in 846 mice
+
+PS_ARG_mech <- tax_glom(PS.ARG.raw_jS, taxrank = "Resistance_Mechanism")
+PS_ARG_mech
+
+## 6 taxa in 858 mice
+
+PS_ARG_var <- tax_glom(PS.ARG.raw_jS, taxrank = "Variant")
+PS_ARG_var
+
+unique(data.frame(PS_ARG_var@tax_table)$Variant)
+
+## 48 taxa in 858 mice, but 37 unique ones
+
+## get data at ARO level
+
+PS_ARG_aro <- tax_glom(PS.ARG.raw_jS, taxrank = "ARO")
+  
+PS_ARG_aro
+
+#View(tax_table(PS_ARG_aro))
+
+unique(data.frame(PS_ARG_aro@tax_table)$ARO)
+
+```
+
+### Associating traits data with ARGs taxa matrix
+```{r}
+# traits summary
+
+traits_summary <- arg_trait %>%
+  left_join(., new_tax) %>%
+  dplyr::select(-Variant) 
+
+unique(traits_summary$drug_class)
+
+traits_summary <- traits_summary %>% 
+  mutate(drug_class_grp = case_when(
+    drug_class %in% c("beta-lactam", "cephalosporin", "carbapenem") ~ "Beta-lactams",
+    drug_class %in% c("macrolide", "lincosamide", "streptogramin", "elfamycin") ~ "MLS",
+    drug_class %in% c("fluoroquinolone", "rifamycin", "phenicol") ~ "Aromatics",
+    drug_class %in% c("pleuromutilin", "fusidane") ~ "Terpenoids",
+    drug_class %in% c("aminoglycoside") ~ "Aminoglycosides",
+    drug_class %in% c("sulfonamide") ~ "Sulfonamides",
+    drug_class %in% c("glycopeptide", "peptide") ~ "Peptides",
+    drug_class %in% c("tetracycline") ~ "Tetracyclines",
+    drug_class %in% c("diaminopyrimidine","phosphonic_acid", "aminocoumarin",
+                      "nitroimidazole", "nucleoside", "zoliflodacin","mupirocin") ~ "Other",
+    drug_class == "multidrug" ~ "Multidrug",
+    TRUE ~ "Unclassified"  # Catch any unexpected drug_class
+  ),
+  localization_grp = case_when(
+    localization %in% c("multiple_mge","pathogenicity_islands") ~ "mge_pai",
+    .default = localization)
+  )
+
+
+```
+
+## Extract ARGs presence / absence data for each mouse
+```{r get table with pa data}
+
+## change the row names of tax table and col names of otu tables for new ones so they are easier to merge
+rownames(PS_ARG_aro@tax_table) <- paste0("ASV", 1:nrow(PS_ARG_aro@tax_table))
+colnames(PS_ARG_aro@otu_table) <- paste0("ASV", 1:ncol(PS_ARG_aro@otu_table))
+
+PS_ARG_aro@otu_table
+PS_ARG_aro@tax_table
+
+otut <- data.frame(PS_ARG_aro@otu_table)
+taxt <- data.frame(PS_ARG_aro@tax_table)
+taxt$ARO
+
+rownames(otut) <- make.names(taxt$ARO, unique = TRUE)
+
+head(otut)
+
+## make data presence / absence
+otut_pa <- otut
+otut_pa[otut_pa > 0] <- 1
+ 
+head(otut_pa)
+
+## need to set the mouseId as a column to merge the data later
+otut_pa <- otut_pa %>%
+  t(.) %>% 
+  data.frame(.) %>%
+  tibble::rownames_to_column("mouseID")
+
+```
+
+
+```{r check duplicates}
+## to remove duplicates, we need to transpose the data, merge the rows with the same name and transpose again to the original format
+sampleID <- rownames(otut_pa)
+taxaID <- colnames(otut_pa)
+
+length(unique(taxaID)) # 341: 340 Fam + mouseID
+length(unique(sampleID)) # 846 samples
+# No dup
+```
+
+## Prepare final mice data
+
+Assign precipitation and temperature values to the year the mouse where captured.
+
+```{r}
+head(mice_data)
+
+mice_data %>% 
+  group_by(loc) %>% 
+  # mutate(numId = seq(1:length(unique(loc)))) 
+  mutate(locID =  cur_group_id()) %>% 
+  dplyr::select(mouseID, locID) 
+
+## filter environmnetal variables and set pig density NA to 0
+mice_data2 <- mice_data %>% 
+  group_by(loc) %>% 
+  mutate(numlocID =  cur_group_id()) %>% 
+  mutate(locID = paste0("loc_", numlocID)) %>% 
+  ungroup() %>% 
+  ungroup() %>%                       
+  mutate(mouseID = paste0("ASV", 1:n())) %>%
+  mutate(precipitation_aug = case_when(
+    year == 2015 ~ prec_aug_2015,
+    year == 2016 ~ prec_aug_2016,
+    year == 2017 ~ prec_aug_2017,
+    year == 2018 ~ prec_aug_2018,
+    year == 2019 ~ prec_aug_2019,
+    year == 2021 ~ prec_aug_2021,
+    year == 2022 ~ prec_aug_2022,
+    TRUE ~NA)) %>% 
+    mutate(air_temp_aug = case_when(
+    year == 2015 ~ temp_aug_2015,
+    year == 2016 ~ temp_aug_2016,
+    year == 2017 ~ temp_aug_2017,
+    year == 2018 ~ temp_aug_2018,
+    year == 2019 ~ temp_aug_2019,
+    year == 2021 ~ temp_aug_2021,
+    year == 2022 ~ temp_aug_2022,
+    TRUE ~NA)) %>% 
+  mutate(sex = as.factor(sex), 
+         municipality_code = as.factor(as.character(gem_char)), 
+         region = as.factor(region)) %>% 
+  mutate(pig_dens = replace_na(pig_dens, 0)) %>% 
+  dplyr::select(-c(loc, prec_aug_2015, prec_aug_2016, prec_aug_2017, prec_aug_2018, prec_aug_2019, prec_aug_2021, prec_aug_2022, 
+                   temp_aug_2015, temp_aug_2016, temp_aug_2017, temp_aug_2018, temp_aug_2019, temp_aug_2021, temp_aug_2022,
+                   ID, CATO, PITO, POTO, gem_char, HI))
+mice_data2
+
+## add bacteria
+all_data <- mice_data2 %>% 
+  left_join(otut_pa, by = c("mouseID"))
+
+head(all_data)
+```
+
+# Run jSDM
+
+For the JSDM we need:
+- a matrix of species: sites in rows (mice) and species in columns (OTU)
+- a data frame with the environmental covariates for sites: sites (mice) in rows, same order as above
+- a trait data frame with information on the species (OTU/ARO)
+- random structure
+- spatial structure
+
+## Set up variables and model structure
+
+```{r}
+colnames(all_data)
+
+# response matrix 
+my_response <- colnames(otut_pa)[-1] ## remove mouseID
+response_pa <- all_data %>% 
+  dplyr::select(all_of(my_response)) %>% 
+  as.matrix()
+
+# explanatory df
+my_cov <- c("sex", "BMI",  
+            "Ntrapped", 
+            "agri", "imperv", "tcd", "swf", 
+            "dist_road", "dist_path",
+            "cat_dens", "pig_dens", "pou_dens", 
+            "precipitation_aug", "air_temp_aug")
+
+explanatory_var <- all_data %>% 
+  dplyr::select(all_of(my_cov)) 
+
+as.data.frame(explanatory_var[!complete.cases(explanatory_var),])
+
+## spatial data (without duplicates)
+xyData <- all_data %>%
+  group_by(locID) %>% 
+  summarise(lon = unique(lon), 
+            lat = unique(lat)) %>% 
+  tibble::column_to_rownames("locID")
+
+## three nested random effects
+studyDesign <- data.frame(sample = as.factor(all_data$mouseID), 
+                          farm_ID = as.factor(all_data$locID), 
+                          spatial_autocorrelation = as.factor(all_data$locID), 
+                          year = as.factor(all_data$year))
+
+rL3 <- HmscRandomLevel(units = levels(all_data$year)) # account for temporal correlation
+rL2 <- HmscRandomLevel(units = levels(all_data$locID)) # accounts for nested sampling 
+rL1 <- HmscRandomLevel(sData = xyData, units = levels(all_data$locID)) # accounts for spatial locations
+
+
+## trait data
+
+TrData_aro <- traits_summary %>%
+  mutate(ARO = str_replace_all(ARO, c(":"),c("."))) %>%
+  `rownames<-`(.[,1]) %>%
+  dplyr::select(-ARO, -ARG_CARD_Short, -AMR_gene_family, -drug_class)
+
+head(TrData_aro)
+
+TrData_aro <- TrData_aro[match(colnames(response_pa), rownames(TrData_aro)), ]
+
+unique(TrData_aro$drug_class_grp)
+
+unique(TrData_aro$Resistance_Mechanism)
+
+```
+
+
+### Define MCMC parameters
+```{r}
+## Initial parameters to test the data
+thin <- 10
+samples <- 1000
+transient <- 100
+nChains <- 4
+verbose <- 10
+
+# Regression formula with all environmental covariates
+
+XFormula_OTU = ~ sex + BMI + Ntrapped + 
+  agri + imperv + tcd + swf + 
+  dist_road + dist_path + 
+  cat_dens + pig_dens + pou_dens + 
+  precipitation_aug + air_temp_aug
+
+## no traits or phylogeny are used at this time
+
+TrFormula_aro = ~ localization_grp + mobility + drug_class_grp + Resistance_Mechanism
+
+
+```
+
+
+### Fit models for PRESENCE/ABSENCE  data 
+
+*BINOMIAL DISTRIBUTION* ~> PROBIT MODEL
+
+```{r}
+
+m <- Hmsc(Y = response_pa, 
+          XData = explanatory_var, 
+          XFormula = XFormula_OTU,
+          TrData = TrData_aro,
+          TrFormula = TrFormula_aro,
+          studyDesign = studyDesign, 
+          ranLevels=list(
+            "spatial_autocorrelation"= rL1, 
+            "farm_ID" = rL2, 
+            "year" = rL3),
+          distr = "probit")
+
+```
+
+## Run model
+```{r}
+# Run Markov Chains
+# test
+m <- sampleMcmc(m, thin = 1, samples = 10)
+
+tic("Hmsc model")
+# the real model
+m <- sampleMcmc(m, thin = thin, samples = samples, transient = transient, 
+                nChains = nChains, verbose = verbose, nParallel = nChains)
+toc()
+
+
+# Set a name for the model
+filename <- paste0(model_wd, "/jsdm_model_",date,".rds")
+
+#Save the model
+saveRDS(m, file = filename) 
+# 
+```
+
+# Check the model
+
+```{r model convergence}
+#model path
+filename <- paste0(model_wd, "/jsdm_model_",date,".rds")
+
+# retrieve model
+m <- readRDS(filename)
+
+m
+```
+
+Hmsc object with 846 sampling units, 340 species, 15 covariates, 22 traits and 3 random levels
+Posterior MCMC sampling with 4 chains each with 1000 samples, thin 10 and transient 100  
+
+## Model convergence 
+
+We evaluate MCMC convergence in terms of two kinds of parameters that we are especially interested in:
+the species niches Beta, and the residual species associations Omega. 
+
+Evaluate convergence: Effective sample size and Gelman-Rubin diagnostic (potential reduction factor).   
+One can then reason that we should run our chains until the value of R is close to 1 (< 1.1).
+
+```{r model convergence}
+mpost <- convertToCodaObject(m)
+
+saveRDS(mpost, paste0(model_wd, "/jsdm_mpost_coda_", date, ".rds"))
+
+# Save plots of the chains
+MCMCtrace(mpost$Beta, 
+          pdf = TRUE, 
+          open_pdf = FALSE,
+          filename = paste0("jsdm_MCMC_trace_beta_",date),
+          wd = model_wd)
+
+MCMCtrace(mpost$Omega[[1]], 
+          pdf = TRUE, 
+          open_pdf = FALSE,
+          filename = paste0("jsdm_MCMC_trace_omega_",date),
+          wd = model_wd)
+
+MCMCtrace(mpost$Gamma, 
+          pdf = TRUE, 
+          open_pdf = FALSE,
+          filename = paste0("jsdm_MCMC_trace_gamma_",date),
+          wd = model_wd)
+
+par(mfrow=c(1,1))
+
+# Numerical output
+ess.beta <- effectiveSize(mpost$Beta)
+ess.omega <- effectiveSize(mpost$Omega[[1]])
+ess.gamma <- effectiveSize(mpost$Gamma)
+
+gd.beta <- gelman.diag(mpost$Beta, multivariate = FALSE)$psrf
+#gd.omega <- gelman.diag(mpost$Omega[[1]], multivariate = FALSE)$psrf
+gd.gamma <- gelman.diag(mpost$Gamma, multivariate = FALSE)$psrf
+
+# mean values
+mean(ess.beta) #[1] 1623.94
+mean(ess.omega) # [1] 835.2532
+mean(ess.gamma) # [1] 927.4198
+
+mean(gd.beta) #[1] 1.028207
+#mean(gd.omega) #[1] impossible to compute
+mean(gd.gamma) #[1] 1.036653
+
+ess.beta_hist <- data.frame(ess.beta) %>%
+  ggplot(aes(x=ess.beta)) + 
+  geom_histogram(color="black", fill="white") +
+  geom_vline(xintercept = mean(ess.beta), colour = "#440154FF", linewidth = 1, linetype = "dashed") +
+  geom_text(aes(y = 400, x = 2500), label = round(mean(ess.beta),2), colour = "#440154FF", size = 3, family = "Poppins") +
+  labs(x = "Beta ESS", y = "Count") +
+  theme_mg()
+
+ess.omega_hist <- data.frame(ess.omega) %>%
+  ggplot(aes(x=ess.omega)) + 
+  geom_histogram(color="black", fill="white") +
+  geom_vline(xintercept = mean(ess.omega), colour = "#440154FF", linewidth = 1, linetype = "dashed") +
+  geom_text(aes(y = 13500, x = 1500), label = round(mean(ess.omega),2), colour = "#440154FF", size = 3, family = "Poppins") +
+  labs(x = "Omega ESS", y = "Count") +
+  theme_mg()
+
+ess.gamma_hist <- data.frame(ess.gamma) %>%
+  ggplot(aes(x=ess.gamma)) + 
+  geom_histogram(color="black", fill="white") +
+  geom_vline(xintercept = mean(ess.gamma), colour = "#440154FF", linewidth = 1, linetype = "dashed") +
+  geom_text(aes(y = 40, x = 1500), label = round(mean(ess.gamma),2), colour = "#440154FF", size = 3, family = "Poppins") +
+  labs(x = "Gamma ESS", y = "Count") +
+  theme_mg()
+
+#
+gd.beta_hist <- data.frame(gd.beta) %>%
+  ggplot(aes(x=Point.est.)) + 
+  geom_histogram(color="black", fill="white") +
+  geom_vline(xintercept = mean(data.frame(gd.beta)$Point.est.), colour = "#440154FF", linewidth = 1, linetype = "dashed") +
+  geom_text(aes(y = 3000, x = 1.1), label = round(mean(gd.beta),2), colour = "#440154FF", size = 3, family = "Poppins") +
+  labs(x = "Beta GR", y = "Count") +
+  theme_mg()
+
+# gd.omega_hist <- data.frame(gd.omega) %>%
+#   ggplot(aes(x=Point.est.)) + 
+#   geom_histogram(color="black", fill="white") +
+#   geom_vline(xintercept = mean(data.frame(gd.omega)$Point.est.), colour = "#440154FF", linewidth = 1, linetype = "dashed") +
+#   geom_text(aes(y = 10, x = 1.01), label = round(mean(data.frame(gd.omega)$Point.est.),2), colour = "#440154FF", size = 3, family = "Poppins") +
+#   labs(x = "Gelman-Rubin Diagnostic Omega", y = "Count") +
+#   theme_mg()
+
+gd.gamma_hist <- data.frame(gd.gamma) %>%
+  ggplot(aes(x=Point.est.)) + 
+  geom_histogram(color="black", fill="white") +
+  geom_vline(xintercept = mean(data.frame(gd.gamma)$Point.est.), colour = "#440154FF", linewidth = 1, linetype = "dashed") +
+  geom_text(aes(y = 150, x = 1.08), label = round(mean(gd.gamma),2), colour = "#440154FF", size = 3, family = "Poppins") +
+  labs(x = "Gamma GR", y = "Count") +
+  theme_mg()
+
+
+PLOT_Model_convergence <- plot_grid(ess.beta_hist, 
+                                    ess.omega_hist, 
+                                    ess.gamma_hist,
+                                    gd.beta_hist, 
+                                    #gd.omega_hist,
+                                    NA,
+                                    gd.gamma_hist)
+PLOT_Model_convergence
+
+ggsave(paste0(model_wd, "/Plot_jsdm_convergence_hist_", date, ".png"), PLOT_Model_convergence, 
+      dpi = 600, width = 32, height = 13.33, units = "cm")
+
+#Save plot appendices
+
+ggsave(filename = here("figures", "appendices", paste0("Plot_jsdm_convergence_hist_", date, ".png")), PLOT_Model_convergence, dpi = 600, width = 16, height = 12, units = "cm")
+
+
+```
+
+Model convergence:  
+Average effective sample sizes are high (> 800), showing that the model estimates robust parameters, and indicate low autocorrelation and good mixing.  
+Gelman-Rubin Diagnostic values are acceptable for betas (1.03) and gammas (1.04), which means chains have converged well. It couldn't be compiled for omegas for structural a reasons (huge matrices for each sample).  
+
+```{r}
+
+mpost <- readRDS(paste0(model_wd, "/jsdm_mpost_coda_", date, ".rds"))
+
+```
+
+## Model Fit (R2)
+
+```{r model fit}
+# Explanatory R2. Get predictions for the observed values 
+preds <- computePredictedValues(m, expected = TRUE)
+
+preds.values <- apply(abind(preds,along=3),c(1,2), median) # Median of the predictions
+write.csv(preds.values, paste0(model_wd, "/jsdm_predicted_values_median_", date, ".csv"))
+preds.values.mean <- apply(abind(preds, along = 3), c (1,2), mean) # Mean of the predictions
+write.csv(preds.values.mean, paste0(model_wd, "/jsdm_predicted_values_mean_", date, ".csv"))
+
+# R2 with the built in function
+modelr2.explanatory <- evaluateModelFit(hM = m, predY = preds)
+modelr2.explanatory
+```
+
+```{r}
+# R2 of the model
+mean(modelr2.explanatory$TjurR2, na.rm=T)
+# [1] 0.1238726
+
+# AUC of the model
+mean(modelr2.explanatory$AUC, na.rm=T)
+# [1] 0.9017532
+
+# RMSE of the model
+mean(modelr2.explanatory$RMSE, na.rm=T)
+# [1] 0.1688351
+
+
+temp.r2 <- cbind.data.frame(r2 = as.numeric(modelr2.explanatory$TjurR2), 
+                            species = as.character(m$spNames))
+
+ggplot(data = temp.r2, aes(y=r2, x=species))+
+  geom_col() + 
+  theme_mg() +
+  theme(axis.text.x = element_text(angle = 45, hjust= 1, vjust = 1))
+
+write.csv(modelr2.explanatory, paste0(model_wd, "/jsdm_explanatory_R2_", date, ".csv"), row.names = FALSE)
+
+# R2 Manually comparing observed vs predicted
+R2.sp <- matrix(NA, m$ns, 1)
+for (i in 1:m$ns) {
+  R2.sp[i, ] <- cor(preds.values.mean[, i],m$Y[, i])^2
+}
+
+mean(R2.sp, na.rm=TRUE)
+# [1] 0.1746014
+
+# Plot of the default R2
+ggplot(data = as.data.frame(modelr2.explanatory$TjurR2), aes(y=modelr2.explanatory$TjurR2, x=temp.r2$species))+
+  geom_col() + 
+  xlab("Species") +
+  ylab("R2 for each species") +
+  ggtitle(paste0("ARG Resistance mechanism in mice - Default R2 species \n R2 = ", 
+                   round(mean(modelr2.explanatory$R2, na.rm = TRUE), 2))) +
+  theme_mg() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+ggsave(paste0(model_wd, "/Plot_jsdm_R2_species_default", date, ".png"))
+
+
+# Plot of the manual R2
+ggplot(data = as.data.frame(R2.sp), aes(y=V1, x=temp.r2$species))+
+  geom_col() +
+  xlab("Species") +
+  ylab("R2 for each species") +
+  ggtitle(paste0("ARG Resistance mechanism in mice - Obs vs pred R2 species \n R2 = ", 
+                   round(mean(R2.sp, na.rm = TRUE), 2))) +
+  theme_mg() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+ggsave(paste0(model_wd, "/Plot_jsdm_R2_species_manual", date, ".png"))
+```
+
+```{r site R2}
+R2.site <- matrix(NA, m$ny, 1)
+for (i in 1:m$ny) {
+  R2.site[i, ] <- cor(preds.values.mean[i, ], m$Y[i, ])^2
+}
+mean(R2.site, na.rm = TRUE)
+# [1] 0.7230648
+```
+
+Model fit:  
+PseudoR2 (Tjur R2) = 0.13  
+-> A value of 0.13 is relatively low, suggesting that the fixed effects only explain 13% of the variation in species occurrence probabilities.  
+AUC = 0.91   
+-> A value of 0.91 indicates strong predictive performance of the model. This suggests the model is quite effective in identifying sites with high or low probabilities of species occurrence.  
+R2.sp = 0.17  
+->  A value of 0.17 is moderate, suggesting that the model explains 17% of the variation in species-specific responses. This may indicates that many species are rare, or poorly predicted by environmental predictors included in the model.  
+R2.site = 0.72   
+-> A value of 0.72 is high, indicating that the model does a very good job at capturing site-level differences, showing that random effects, such as spatial structure, location, and so on are very important.  
+
+
+# Model results
+
+## Inspect Beta coefficients
+
+The Beta coefficients represent the species-environment relationships, and we can visualize these relationships for different species and environmental variables.
+
+```{r betas}
+Beta.results <- as.data.frame(MCMCsummary(mpost$Beta))
+write.csv(Beta.results, paste0(model_wd, "/jsdm_beta_coefficients_", date, ".csv"), row.names = TRUE)
+
+postBeta <- getPostEstimate(m, parName = "Beta")
+saveRDS(postBeta, file=paste0(model_wd, "/jsdm_postBeta_", date, ".rds"))
+
+#Get species and covariate names from model
+spNames <- m$spNames
+covNames <- m$covNames
+
+#pull the data from postBeta for plotting
+mbeta <- postBeta$mean
+betaP <- postBeta$support
+
+# Support 95%
+#Choose the support level for Beta plot
+supportLevel <- 0.95
+
+sign <- sign(mbeta)
+
+Beta_association_values <- data.frame(((betaP > supportLevel) + (betaP < (1 - supportLevel)) > 0) * sign) 
+colnames(Beta_association_values) <- spNames
+rownames(Beta_association_values) <- covNames
+#Beta_association_values[Beta_association_values == 0] <- NA
+  
+PLOT_Betas_ARG_resmech_95 <- ggcorrplot(Beta_association_values, method = "square") +
+  labs(fill = "") +
+  theme_mg_cor() 
+
+PLOT_Betas_ARG_resmech_95
+
+ggsave(paste0(model_wd, "/Plot_jsdm_beta_sign95_", date, ".png"), PLOT_Betas_ARG_resmech_95, dpi = 600)
+
+# Support 75%
+#Choose the support level for Beta plot
+supportLevel <- 0.75
+
+sign <- sign(mbeta)
+
+Beta_association_values <- data.frame(((betaP > supportLevel) + (betaP < (1 - supportLevel)) > 0) * sign) 
+colnames(Beta_association_values) <- spNames
+rownames(Beta_association_values) <- covNames
+#Beta_association_values[Beta_association_values == 0] <- NA
+  
+PLOT_Betas_ARG_resmech_75 <- ggcorrplot(Beta_association_values, method = "square") +
+  labs(fill = "") +
+  theme_mg_cor() 
+
+PLOT_Betas_ARG_resmech_75
+
+ggsave(paste0(model_wd, "/Plot_jsdm_beta_sign75_", date, ".png"), PLOT_Betas_ARG_resmech_75, dpi = 600)
+
+```
+
+
+```{r betas_faceted_plot}
+# Extracting Mech names and Beta summaries
+ARG <- colnames(m$Y)
+
+# Summary statistics from Beta
+beta_summary <- summary(mpost$Beta)
+
+# Creating model frame for plotting
+modelFrame_plot <- data.frame(
+  Variable = colnames(mpost$Beta[[1]]),
+  Coefficient = beta_summary$statistics[, 1],
+  CI_low = beta_summary$quantiles[, 1],
+  Q_25 = beta_summary$quantiles[, 2],
+  Q_50 = beta_summary$quantiles[, 3],
+  Q_75 = beta_summary$quantiles[, 4],
+  CI_high = beta_summary$quantiles[, 5]) %>%
+  mutate(ARG = gsub( "\\.", " ", rep(ARG, each = 15)), # Add AMR and cleaned variables
+         Variable = stringr::str_sub(stringr::word(Variable, 1), 3, -1), 
+         significant = ifelse(CI_low > 0 | CI_high < 0, "Yes", "No")) # Flag significant estimates (credible intervals not overlapping zero)
+
+write.csv(modelFrame_plot, paste0(model_wd, "/jsdm_beta_modelFrame_", date, ".csv"), row.names = FALSE)
+
+
+```
+
+```{r betas_ResMech_individual_plots}
+
+# Loop through each unique Resistance Mechanism
+for (ARG_lab in unique(modelFrame_plot$ARG)) {
+  
+  # Filter the data for the current Resistance Mechanism
+  filtered_data <- modelFrame_plot %>% filter(ARG == ARG_lab)
+  
+  # Create the plot for the current ResMech
+  myplot <- ggplot(filtered_data, aes(x = Variable, y = Coefficient, colour = Variable)) + 
+    geom_hline(yintercept = 0, colour = gray(1/2), linetype = "dashed") + 
+    geom_linerange(aes(ymin = CI_low, ymax = CI_high, fill = significant),
+                   size = 0.8, position = position_dodge(width = 1.2/2)) + 
+    geom_linerange(aes(ymin = Q_25, ymax = Q_75, fill = significant),
+                   size = 1.5, position = position_dodge(width = 1.2/2)) + 
+    geom_pointrange(aes(y = Coefficient, ymin = Q_25, ymax = Q_75, fill = significant),
+                    size = 0.5, shape = 21, position = position_dodge(width = 1.2/2)) +
+    scale_fill_manual(values = c("White", "Black")) +
+    scale_x_discrete(limits = rev(unique(modelFrame_plot$Variable))) +
+    coord_flip() + 
+    scale_colour_viridis_d(option = "viridis", begin = 0.1, end = 0.9, guide = guide_legend(reverse = TRUE)) +
+    theme_mg() +
+    theme(
+       panel.background = element_rect(fill = NA),
+       panel.grid.major = element_blank(), 
+       axis.line = element_line(colour = "black"),
+       legend.position = "none") +
+    labs(title = paste0("Effects of variables on ", ARG),
+         x = "Variables",
+         y = "Coefficient Estimate")
+  
+  # Define the file name for the plot
+  plotfile <- paste0(model_wd, "/BetaPlots/ARG/Plot_betas_", gsub(" ", "_", ARG_lab), "_", date, ".png")
+  
+  # Save the plot as a PNG file
+  ggsave(plot = myplot, filename = plotfile, height = 13.33, width = 15.79, units="cm")
+}
+
+```
+
+```{r betas_effects_individual_plots}
+
+# Plotting and saving the effects of the variables
+for (i in 1:length(unique(modelFrame_plot$Variable))){
+  var <- unique(modelFrame_plot$Variable)[i]
+  
+  myplot <- modelFrame_plot %>% 
+    filter(Variable == var) %>% 
+  ggplot(aes(group = ARG, colour = significant)) + 
+  geom_hline(yintercept = 0, colour = gray(1/2), lty = 2) + 
+  geom_linerange(aes(x = ARG, ymin = CI_low,
+                                ymax = CI_high, fill = significant),
+                            lwd = 0.8, position = position_dodge(width = 1.2/2)) + 
+  geom_linerange(aes(x = ARG, ymin = Q_25,
+                                ymax = Q_75, fill = significant),
+                            lwd = 1.5, position = position_dodge(width = 1.2/2)) + 
+  geom_pointrange(aes(x = ARG, y = Coefficient, ymin = Q_25,
+                                 ymax = Q_75, fill = significant),
+                             lwd = 1/2, shape = 21, position = position_dodge(width = 1.2/2)) +
+  scale_fill_manual(values = c("White", "black"))+
+  
+  # scale_y_continuous(limits = c(-4.2, 3)) +
+  coord_flip() + 
+  scale_colour_viridis_d(option = "viridis", begin = 0.1, end = 0.9, 
+                         guide = guide_legend(reverse = TRUE)) +
+  theme(
+    panel.background = element_rect(fill = NA),
+    panel.grid.major = element_blank(), 
+    axis.line = element_line(colour = "black"),
+    legend.position = "NONE") +
+    ggtitle(paste0("Effects of ", var))
+  
+  plotfile <- paste0(model_wd, "/BetaPlots/EnvCov/Plot_betas_", var, "_", date, ".png")
+  ggsave(plot = myplot, plotfile, height = 16, width = 20)
+  
+}
+
+```
+
+
+## Inspect Gamma coefficients
+
+The Gamma coefficients represent the species traits-environment relationships, and we can visualize these relationships for different species and environmental variables.
+
+```{r gammas}
+Gamma.results <- as.data.frame(MCMCsummary(mpost$Gamma))
+write.csv(Gamma.results, paste0(model_wd, "/jsdm_Gamma_coefficients_", date, ".csv"), row.names = TRUE)
+
+postGamma <- getPostEstimate(m, parName = "Gamma")
+saveRDS(postGamma, file=paste0(model_wd, "/jsdm_postGamma_", date, ".rds"))
+
+#postGamma <- readRDS(paste0(model_wd, "/jsdm_postGamma_", date, ".rds"))
+
+#Get species and covariate names from model
+trNames <- m$trNames
+covNames <- m$covNames
+
+#pull the data from postGamma for plotting
+mGamma <- postGamma$mean
+GammaP <- postGamma$support
+
+
+Gamma_association_mean <- data.frame(mGamma)
+colnames(Gamma_association_mean) <- trNames
+rownames(Gamma_association_mean) <- covNames
+#Gamma_association_values[Gamma_association_values == 0] <- NA
+
+Gamma_association_support <- data.frame(GammaP)
+colnames(Gamma_association_support) <- trNames
+rownames(Gamma_association_support) <- covNames
+
+Gamma_association_values_df <- Gamma_association_mean %>%
+  mutate(covNames = rownames(Gamma_association_mean)) %>%
+  gather(trait,value,-covNames) %>%
+  left_join(., Gamma_association_support %>%
+  mutate(covNames = rownames(Gamma_association_support)) %>%
+  gather(trait, support_lvl, -covNames)  %>%
+  mutate(sign = ifelse(support_lvl > 0.95 | support_lvl < (1 - 0.95), "*", 
+                       ifelse(support_lvl > 0.75 | support_lvl < (1 - 0.75), "·", NA)))) %>%
+  mutate(type = str_replace_all(trait, c(".*localization.*" = "Localization",
+                                         ".*mobility.*" = "Mobility",
+                                         ".*drug_class.*" = "Drug class",
+                                         ".*Resistance_Mechanism.*" = "Resistance mechanism",
+                                         ".*(Intercept).*" = "Intercept")),
+         trait = str_replace_all(trait, c("localization_grp" = "",
+                                         "mobility" = "",
+                                         "drug_class_grp" = "",
+                                         "Resistance_Mechanism" = "",
+                                         "antibiotic " = "",
+                                         " to antibiotic" = "",
+                                         ".*Intercept.*" = "Intercept",
+                                         "TRUE" = "mobile"))) %>%
+  mutate(covNames = factor(covNames, levels = c("(Intercept)", "sexM", "BMI", "Ntrapped", "agri", "imperv", "tcd", "swf", "dist_road", "dist_path", "cat_dens", "pig_dens", "pou_dens", "precipitation_aug", "air_temp_aug"),
+                           labels = c("(Intercept)", "sex-M", "BMI", "Ntrapped", "agri", "imperv", "tcd", "swf", "dist_road", "dist_path", "cat_dens", "pig_dens", "pou_dens", "precip", "temp")),
+         type = factor(type, levels = c("Intercept","Mobility","Localization","Drug class","Resistance mechanism"), labels = c("Intercept","Mobility","Localization","Drug class","Resistance\nmechanism"))) 
+
+#unique(Gamma_association_values_df$covNames)
+#unique(Gamma_association_values_df$type)
+library(ggforce)
+
+### sample size
+
+# N ARGs 
+# N mice
+# N farm ID
+
+data_ARG <- psmelt(PS_ARG_aro) %>%
+  left_join(traits_summary) 
+
+mobile <- data_ARG %>%
+  group_by(mobility) %>%
+  filter(Abundance > 0) %>%
+  summarize(N_ARG = length(unique(ARO)),
+            N_mice = length(unique(mouseID)),
+            N_farmID = length(unique(farm_ID))) %>%
+  rename(trait = mobility)
+  
+localization <- data_ARG %>%
+  group_by(localization_grp) %>%
+  filter(Abundance > 0) %>%
+  summarize(N_ARG = length(unique(ARO)),
+            N_mice = length(unique(mouseID)),
+            N_farmID = length(unique(farm_ID))) %>%
+  rename(trait = localization_grp)
+
+drug_class <- data_ARG %>%
+  group_by(drug_class_grp) %>%
+  filter(Abundance > 0) %>%
+  summarize(N_ARG = length(unique(ARO)),
+            N_mice = length(unique(mouseID)),
+            N_farmID = length(unique(farm_ID))) %>%
+  rename(trait = drug_class_grp)
+
+res_mech <- data_ARG %>%
+  group_by(Resistance_Mechanism) %>%
+  filter(Abundance > 0) %>%
+  summarize(N_ARG = length(unique(ARO)),
+            N_mice = length(unique(mouseID)),
+            N_farmID = length(unique(farm_ID))) %>%
+  rename(trait = Resistance_Mechanism)
+
+intercept <-  data_ARG %>%
+  filter(mobility == "FALSE",
+         localization_grp == "chromosome", 
+         drug_class_grp == "Aminoglycosides", 
+         Resistance_Mechanism == "antibiotic efflux") %>% 
+  filter(Abundance > 0) %>%
+  summarize(N_ARG = length(unique(ARO)),
+            N_mice = length(unique(mouseID)),
+            N_farmID = length(unique(farm_ID)))
+
+
+N_arg <- mobile %>%
+  rbind(., localization) %>%
+  rbind(., drug_class) %>%
+  rbind(., res_mech) %>%
+  mutate(trait = str_replace_all(trait, c("antibiotic " = "",
+                                          " to antibiotic" = "",
+                                          "TRUE" = "mobile"))) %>%
+  filter(!trait %in% c("FALSE", "chromosome", "Aminoglycosides", "efflux")) %>%
+  left_join(Gamma_association_values_df) %>%
+  filter(covNames != "(Intercept)") %>%
+  dplyr::select(-covNames, -value, -support_lvl, -sign) %>%
+  gather("covNames","sample", 2:4) %>%
+  distinct() %>%
+  mutate(covNames = str_replace_all(covNames, c("N_ARG" = "# ARG",
+                                          "N_mice" = "# mice",
+                                          "N_farmID" = "# farm")),
+         value = NA,
+         support_lvl = NA,
+         sign = NA)
+
+# Plotting
+
+PLOT_Gamma_all <- Gamma_association_values_df %>%
+  full_join(N_arg) %>%
+  mutate(covNames = factor(covNames, levels = c("sex-M", "BMI", "Ntrapped", "agri", "imperv", "tcd", "swf", "dist_road", "dist_path", "cat_dens", "pig_dens", "pou_dens", "precip", "temp", "# ARG", "# mice","# farm"))) %>%
+  mutate(group = case_when(covNames %in% c("sex-M", "BMI") ~ "Mouse\ncharacteristics",
+                           covNames == c("Ntrapped") ~ "Mouse\ndensity",
+                           covNames %in% c("agri", "imperv", "tcd", "swf") ~ "Landcover",
+                           covNames %in% c("dist_road", "dist_path") ~ "Accessibility",
+                           covNames %in% c("cat_dens", "pig_dens", "pou_dens") ~ "Farm animal\ndensity",
+                           covNames %in% c("precip", "temp") ~ "Climatic",
+                           covNames %in% c("# ARG", "# mice","# farm") ~ "Sample\nsize"),
+         group = factor(group, levels = c("Mouse\ncharacteristics","Mouse\ndensity","Landcover","Accessibility","Farm animal\ndensity","Climatic","Sample\nsize"))) %>%
+  filter(covNames != "(Intercept)") %>%
+  ggplot(., aes(y = trait, x = covNames, fill = value)) +
+  geom_tile(colour = "black") +
+  geom_text(aes(label = sign), size = 5, colour = "black") +
+  geom_text(aes(label = sample), size = 2.5, family = "Poppins") +
+  #scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0,limits = c(-4.5, 10.5)) +
+  scale_fill_gradientn(colors = c("blue4", "blue3","white", "red3","red4"),
+                       values = scales::rescale(c(-5,-2, 0, 5, 10)),
+                       breaks = c(-5,0,5,10),
+                       limits = c(-5,10.5),
+                       na.value="grey99") +
+  scale_x_discrete(position = "top", guide = guide_axis(angle = 90)) +
+#  facet_col(type ~ group, scales = "free_x",  space = "free", strip.position = c("top", "right")) +
+  facet_grid(type ~ group, scales = "free", space = "free", switch = "y") +
+  labs(fill = "Coefficient estimate\n(gamma)") +
+  theme_mg_facets() +
+  theme(
+    text = element_text(size = 8),
+    axis.text.y = element_text(hjust = 1, vjust = 0.4, size = 8),
+    axis.text.x = element_text(size = 8),
+    axis.title = element_blank(),
+    axis.line = element_blank(),
+    legend.position = "bottom",
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    strip.placement = "outside",
+    strip.background = element_rect(fill = "grey90", colour = "grey"),
+    strip.text.x = element_text(angle = 90, size = 8),
+    strip.text.y.left = element_text(angle = 0, size = 8),
+    panel.spacing = unit(0, "cm"))
+
+PLOT_Gamma_all
+
+# Save the plot as a PNG
+
+ggsave(PLOT_Gamma_all , filename = here("figures", paste0("Plot_jsdm_pa_traits_gammas_", date, ".png")), height = 20, width = 16, units = "cm", dpi = 600)
+
+
+
+```
+
+
+```{r model_frame, echo=FALSE, fig.height=3, fig.width=6.3}
+
+mpost <- readRDS(paste0(model_wd, "/jsdm_mpost_coda_", date, ".rds"))
+
+gamma_summary <- summary(mpost$Gamma)
+
+Traits <- trNames
+
+# Creating model frame for plotting
+modelFrame_plot <- data.frame(
+  Variable = colnames(mpost$Gamma[[1]]),
+  Coefficient = gamma_summary$statistics[, 1],
+  CI_low = gamma_summary$quantiles[, 1],
+  Q_25 = gamma_summary$quantiles[, 2],
+  Q_50 = gamma_summary$quantiles[, 3],
+  Q_75 = gamma_summary$quantiles[, 4],
+  CI_high = gamma_summary$quantiles[, 5]) %>%
+  mutate(trait = rep(Traits, each=15), # Add traits and cleaned variables
+         Variable = stringr::str_sub(stringr::word(Variable, 1), 3, -1)) %>% # Flag significant estimates (credible intervals not overlapping zero)
+  mutate(type = str_replace_all(trait, c(".*localization.*" = "Localization",
+                                         ".*mobility.*" = "Mobility",
+                                         ".*drug_class.*" = "Drug class",
+                                         ".*Resistance_Mechanism.*" = "Resistance mechanism",
+                                         ".*(Intercept).*" = "Reference")),
+         trait = str_replace_all(trait, c("localization_grp" = "",
+                                         "mobility" = "",
+                                         "drug_class_grp" = "",
+                                         "Resistance_Mechanism" = "",
+                                         "antibiotic " = "",
+                                         " to antibiotic" = "",
+                                         ".*Intercept.*" = "Reference",
+                                         "TRUE" = "mobile"))) %>%
+  mutate(Variable = factor(Variable, levels = c("(Intercept)", "sexM", "BMI", "Ntrapped", "agri", "imperv", "tcd", "swf", "dist_road", "dist_path", "cat_dens", "pig_dens", "pou_dens", "precipitation_aug", "air_temp_aug"),
+                           labels = c("(Intercept)", "sex-M", "BMI", "Ntrapped", "agri", "imperv", "tcd", "swf", "dist_road", "dist_path", "cat_dens", "pig_dens", "pou_dens", "precip", "temp")),
+         type = factor(type, levels = c("Reference","Mobility","Localization","Drug class","Resistance mechanism")))  %>%
+  left_join(., Gamma_association_values_df, by = c("Variable" = "covNames", "type", "trait")) %>%
+  mutate(significant = ifelse(sign %in% c("*","·"), "Yes", "No"))
+
+filtered_df <- modelFrame_plot %>%
+  filter(type != "Reference", Variable != "(Intercept)")  %>%
+  droplevels()
+
+```
+
+```{r traits_individual_gamma_plots, echo=FALSE, fig.height=3, fig.width=6.3}
+
+for (i in 1:length(unique(filtered_df$type))){
+  type_lab <- unique(filtered_df$type)[i]
+
+Plot_gamma <- filtered_df %>% 
+  filter(type == type_lab) %>%
+  ggplot(aes(x = Variable, colour = trait)) + 
+  scale_x_discrete(limits = rev(levels(filtered_df$Variable))) +
+  geom_hline(yintercept = 0, colour = gray(1/2), lty = 2) + 
+  geom_linerange(aes(x = Variable, ymin = CI_low, ymax = CI_high),
+                            lwd = 0.8, position = position_dodge(width = 1.2/2)) + 
+  geom_linerange(aes(x = Variable, ymin = Q_25, ymax = Q_75),
+                            lwd = 1.5, position = position_dodge(width = 1.2/2)) + 
+  geom_pointrange(aes(x = Variable, y = Coefficient, ymin = Q_25,
+                                 ymax = Q_75, fill = significant),
+                             lwd = 1/2, shape = 21, position = position_dodge(width = 1.2/2)) +  
+  scale_fill_manual(values = c("White", "black"))+
+  facet_wrap(~ trait, scales = "free_x", ncol = 2) +
+  coord_flip() + 
+  scale_colour_viridis_d() +
+  guides(fill = F, colour = F) +
+  labs(colour = "Traits", x= "") +
+  theme_mg_facets() +
+  theme(
+    panel.background = element_rect(fill = NA),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    axis.line = element_line(colour = "black"),
+    legend.position = "bottom")
+
+Plot_gamma
+
+  plotfile <- paste0(model_wd, "/GammaPlots/Plot_gamma_", type_lab, "_", date, ".png")
+  ggsave(plot = Plot_gamma, plotfile, height = 16, width = 20)
+  
+}
+
+```
+
+
+
+## Variance partitioning
+
+Variance partitioning helps understand how much of the variation is explained by the environmental variables vs random effects (e.g., spatial structure, species-specific effects).
+
+The order of the variables, if they are continuous, is 
+1. intercept (this can be in any group)
+2. first variable
+3. second variable
+ETC.
+
+The formulas we used for running the models area: 
+XFormula = ~ sex + BMI + Ntrapped + agri + imperv + tcd + swf + dist_road + 
+    dist_path + cat_dens + pig_dens + pou_dens + precipitation_aug + 
+    air_temp_aug
+
+We grouped variables by different categories:  
+- Mouse characteristics: sex, BMI,  
+- Mouse density: Ntrapped,  
+- Landcover: agri, imperv, tcd, swf_perc,  
+- Connectivity: dist_road, dist_path,  
+- Farm animals density: pou_dens, pig_dens, cat_dens,  
+- Climatic: precipitation_aug, air_temp_aug.  
+
+```{r variance partitioning}
+# design matrix
+head(m$X)
+
+m$XFormula
+# Total variance explained by hte model can be partition into the contributions of each fixed effect (or group) and random effect
+# intercept can go in any group. Here in the first to simplify
+# Groups: mouse_char, mouse_dens, environ, farm_animals, landcove, precipitation
+VP <- computeVariancePartitioning(m, group = c(1, 1, 1, 2, 3, 3, 3, 3, 4, 4, 5, 5, 5, 6, 6),
+                                  groupnames = c("mouse_characteristics", "mouse_dens", "landcover", "accessibility", "farm_animals", "climatic"))
+
+# Save the Variance partitioning info
+VP$vals
+VP$R2T
+
+saveRDS(VP, file = paste0(model_wd, "/jsdm_varpart_", date,".rds"))
+
+```
+
+```{r variance partitioning_2}
+VP <- readRDS(paste0(model_wd, "/jsdm_varpart_", date,".rds"))
+
+VP.table <- data.frame(VP$vals) %>%
+  mutate(Factor = rownames(.)) %>%
+  gather(., "ARO", "Variance_Explained", -Factor) %>%
+  mutate(Factor = factor(Factor, 
+                         levels = c("mouse_characteristics", "mouse_dens", "landcover","accessibility", "farm_animals",  "climatic", "Random: spatial_autocorrelation", "Random: farm_ID", "Random: year"),  
+                         labels = c("Mouse characteristics","Mouse density", "Landcover", "Accessibility", "Farm animals density",  "Climatic", "Random: Spatial autocorrelation", "Random: Farm ID", "Random: Year")),
+          ARO = gsub("\\.", ":", factor(ARO))) %>%
+  left_join(., traits_summary) 
+
+data_ordered_multiple <- VP.table %>%
+  group_by(ARO) %>%
+  mutate(access = Variance_Explained[Factor == "Accessibility"],
+         farm = Variance_Explained[Factor == "Farm animals density"],
+         landcover = Variance_Explained[Factor == "Landcover"],
+         mousechar = Variance_Explained[Factor == "Mouse characteristics"],
+         mousedens = Variance_Explained[Factor == "Mouse density"],
+         climat = Variance_Explained[Factor == "Climatic"],
+         sp_struc = Variance_Explained[Factor == "Random: Spatial autocorrelation"],
+         farm = Variance_Explained[Factor == "Random: Farm ID"],
+         year = Variance_Explained[Factor == "Random: Year"]) %>%
+  ungroup() %>%
+  arrange(
+    desc(landcover),
+    # desc(farm),
+    # desc(landcover),
+    # desc(mousechar),
+    # desc(mousedens),
+    year)
+
+ordered_levels <- unique(data_ordered_multiple$ARO)
+#ordered_levels
+
+
+viridis_cols <- data.frame(colour_grp = setNames(viridis::viridis(length(unique(VP.table$Factor[!grepl("Random", VP.table$Factor)]))),
+                         unique(VP.table$Factor[!grepl("Random", VP.table$Factor)])), Factor = unique(VP.table$Factor[!grepl("Random", VP.table$Factor)])) %>%
+  mutate(Factor = factor(Factor, levels = c(
+    "Mouse characteristics", "Mouse density", 
+    "Landcover", "Accessibility",
+    "Farm animals density",
+    "Climatic", 
+    "Random: Spatial autocorrelation", "Random: Farm ID", "Random: Year"
+  )))
+
+Mean_VP <- VP.table %>%
+  group_by(Factor) %>%
+  mutate(Factor = factor(Factor, levels = c(
+    "Mouse characteristics", "Mouse density", 
+    "Landcover", "Accessibility",
+    "Farm animals density",
+    "Climatic", 
+    "Random: Spatial autocorrelation", "Random: Farm ID", "Random: Year"
+  ))) %>%
+  summarise(mean_var = round(mean(Variance_Explained), 2)) %>%
+  arrange(desc(row_number())) %>% 
+  ungroup() %>%
+  left_join(., viridis_cols) %>%
+  mutate(label = paste0(Factor, "\n", mean_var),
+         ymin = c(0, head(cumsum(mean_var), -1)),
+         ymax = cumsum(mean_var),
+         texty = (ymin + ymax) / 2,
+         colour_grp = ifelse(is.na(colour_grp), "grey20", colour_grp),
+         alpha_group = ifelse(colour_grp=="grey20", 1:5, NA)) 
+
+
+PLOT_piechart_avg_var <- ggplot(Mean_VP, aes(x = 2, y = mean_var, fill = Factor, alpha = Factor)) +
+  geom_bar(stat = "identity", colour = "white") +
+  geom_text_repel(aes(y = texty, label = mean_var, colour = colour_grp), size = 3, family = "Poppins", nudge_x = 1, 
+            show_guide = FALSE) +
+  scale_fill_manual(values = setNames(Mean_VP$colour_grp, Mean_VP$Factor)) +
+  scale_colour_identity() +
+  scale_alpha_manual(values = setNames(scales::rescale(as.numeric(Mean_VP$alpha_group), to = c(1, 0.4), from = range(Mean_VP$alpha_group, na.rm = TRUE)), Mean_VP$Factor)) +
+  coord_polar(theta = "y", start = 0) +
+  labs(fill = "", alpha = "") +
+  xlim(.5, 3) +
+    guides(fill=guide_legend(ncol=3)) +
+  theme_void() +
+  theme(legend.position = "bottom",
+        title = element_text(size = 10, family = "Poppins"),
+        plot.margin = margin(0,0,0,0),
+        legend.text = element_text(size = 9, family = "Poppins"))
+  
+PLOT_piechart_avg_var
+
+ggsave(PLOT_piechart_avg_var, filename = paste0(model_wd, "/Plot_jsdm_VarPar_AVG", date, ".png"), 
+       dpi = 600, height = 13.57, width = 13, units = "cm")
+
+
+
+#####
+VP.table <- VP.table %>%
+  left_join(., Mean_VP)
+
+PLOT_VarPart <- VP.table %>%
+  ggplot(aes(x = factor(ARO, levels = ordered_levels), y = Variance_Explained, fill = Factor, alpha = Factor)) +
+  scale_y_continuous(expand = c(0,0)) +
+  geom_bar(stat = "identity", position = "stack", colour = "NA", width = 1) +
+  scale_fill_manual(values = setNames(VP.table$colour_grp, VP.table$Factor)) +
+  scale_alpha_manual(values = setNames(scales::rescale(as.numeric(VP.table$alpha_group), to = c(0.3, 1), from = range(VP.table$alpha_group, na.rm = TRUE)),
+  VP.table$Group_Label)) +
+  guides(fill=guide_legend(ncol=2)) +
+  labs(x = "ARGs", y = "Variance Explained", fill = "", alpha = "") +
+  theme_mg() +
+  coord_flip() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1, size = 8),
+        plot.text = element_text(size = 10)) 
+
+PLOT_VarPart
+
+# Save the faceted plot as a PNG
+ggsave(PLOT_VarPart, filename = paste0(model_wd, "/Plot_jsdm_VarPar_", date, ".png"), 
+       dpi = 600, height = 34, width = 20, units = "cm")
+
+```
+
+### Variance partitioning for mobile genes
+
+```{r amr_varpart_mobile, echo=FALSE, fig.height=4, fig.width=6.3}
+
+Mean_VP_mobile <- VP.table %>%
+  filter(mobility == T, localization != "chromosome") %>%
+  group_by(Factor) %>%
+  summarise(mean_var = round(mean(Variance_Explained), 2)) %>%
+  arrange(desc(row_number())) %>% 
+  ungroup() %>%
+  left_join(., viridis_cols) %>%
+  mutate(label = paste0(Factor, "\n", mean_var),
+         ymin = c(0, head(cumsum(mean_var), -1)),
+         ymax = cumsum(mean_var),
+         texty = (ymin + ymax) / 2,
+         colour_grp = ifelse(is.na(colour_grp), "grey20", colour_grp),
+         alpha_group = ifelse(colour_grp=="grey20", 1:3, NA)) %>%
+  mutate(Factor = factor(Factor, levels = c(
+    "Mouse characteristics", "Mouse density", 
+    "Landcover", "Accessibility",
+    "Farm animals density",
+    "Climatic", 
+    "Random: Spatial autocorrelation", "Random: Farm ID", "Random: Year"
+  )))
+
+PLOT_piechart_avg_var_mobile <- ggplot(data = Mean_VP_mobile, aes(x = 2, y = mean_var, fill = Factor, alpha = Factor)) +
+  geom_bar(stat = "identity", colour = "white") +
+  geom_text_repel(aes(y = texty, label = mean_var, colour = colour_grp), size = 3, family = "Poppins", nudge_x = 1, 
+            show_guide = FALSE) +
+  scale_fill_manual(values = setNames(Mean_VP_mobile$colour_grp, Mean_VP_mobile$Factor)) +
+  scale_colour_identity() +
+  scale_alpha_manual(values = setNames(scales::rescale(as.numeric(Mean_VP_mobile$alpha_group), to = c(1, 0.4), from = range(Mean_VP_mobile$alpha_group, na.rm = TRUE)), Mean_VP_mobile$Factor)) +
+  coord_polar(theta = "y", start = 0) +
+  xlim(.5, 3) +
+  labs(fill = "", alpha = "") +
+  guides(fill=guide_legend(ncol=3)) +
+  theme_void() +
+  theme(legend.position = "bottom",
+        title = element_text(size = 10, family = "Poppins"),
+        plot.margin = margin(0,0,0,0),
+        legend.text = element_text(size = 9, family = "Poppins"))
+  
+PLOT_piechart_avg_var_mobile
+
+
+```
+
+```{r amr_varpart_combined, echo=FALSE, fig.height=4, fig.width=6.3}
+
+legend_var <- ggfun::get_legend(PLOT_piechart_avg_var_mobile)
+
+
+PLOT_Avg_VarPart_tot_mob <- plot_grid(plot_grid(PLOT_piechart_avg_var + theme(legend.position = "none"), 
+                                                PLOT_piechart_avg_var_mobile + theme(legend.position = "none"),
+                                                align = "hv", 
+                                                axis = "tblr",
+                                                ncol = 2,
+                                                labels = "auto"),
+                                      legend_var,
+                                      nrow = 2,
+                                      rel_heights = c(1,0.4))
+
+PLOT_Avg_VarPart_tot_mob
+
+# Save the plot as a PNG
+
+ggsave(PLOT_Avg_VarPart_tot_mob, filename = here("figures", paste0("Plot_jsdm_pa_varpart_tot_mob_", date, ".png")), height = 10, width = 16, units = "cm", dpi = 600)
+
+
+
+
+```
+
+### Variance partitioning for each traits
+
+Here, we averaged the variance partitioning per traits variables.  
+
+```{r variance partitioning in relation to traits}
+
+Var_loc <- VP.table %>%
+  group_by(localization, Factor) %>%
+  summarize(Variance_Explained = mean(Variance_Explained)) %>% 
+  ggplot(., aes(x = localization, y = Variance_Explained, fill = Factor, alpha = Factor)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = setNames(Mean_VP$colour_grp, Mean_VP$Factor)) +
+  scale_alpha_manual(values = setNames(scales::rescale(as.numeric(Mean_VP$alpha_group), to = c(0.3, 1), from = range(Mean_VP$alpha_group, na.rm = TRUE)), Mean_VP$Factor)) +
+  labs(x = "Localization", y = "Variance Explained", fill = "Explaining Factor", alpha = "Explaining Factor",
+       title = "") +
+  theme_mg() +
+    theme(legend.position = "right",
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
+        plot.text = element_text(size = 10),
+        axis.title = element_text(size=10)) 
+
+Var_drugclass <- VP.table %>%
+  group_by(drug_class_grp, Factor) %>%
+  summarize(Variance_Explained = mean(Variance_Explained)) %>% 
+  ggplot(., aes(x = drug_class_grp, y = Variance_Explained, fill = Factor, alpha = Factor)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = setNames(Mean_VP$colour_grp, Mean_VP$Factor)) +
+  scale_alpha_manual(values = setNames(scales::rescale(as.numeric(Mean_VP$alpha_group), to = c(0.3, 1), from = range(Mean_VP$alpha_group, na.rm = TRUE)), Mean_VP$Factor)) +
+  labs(x = "Drug Class", y = "Variance Explained", fill = "", alpha= "",
+       title = "") +
+  theme_mg() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        axis.title = element_text(size=10))
+
+Var_resmech <- VP.table %>%
+  group_by(Resistance_Mechanism, Factor) %>%
+  summarize(Variance_Explained = mean(Variance_Explained)) %>% 
+  mutate(Resistance_Mechanism = str_replace_all(Resistance_Mechanism, c("antibiotic " = "",
+                                                                        " to antibiotic" = ""))) %>%
+  ggplot(., aes(x = Resistance_Mechanism, y = Variance_Explained, fill = Factor, alpha = Factor)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = setNames(Mean_VP$colour_grp, Mean_VP$Factor)) +
+  scale_alpha_manual(values = setNames(scales::rescale(as.numeric(Mean_VP$alpha_group), to = c(0.3, 1), from = range(Mean_VP$alpha_group, na.rm = TRUE)), Mean_VP$Factor)) +
+  labs(x = "Resistance Mechanism", y = "Variance Explained", fill = "", alpha= "",
+       title = "") +
+  theme_mg() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        axis.title = element_text(size=10))
+
+legend_var <- ggfun::get_legend(Var_resmech)
+
+Plot_VarPart_traits <- plot_grid(Var_loc + theme(legend.position = "none"), 
+          Var_drugclass + theme(legend.position = "none"), 
+          Var_resmech + theme(legend.position = "none"), 
+          legend_var,
+          align = "hv", 
+          axis = "tblr",
+          labels = c("a","b","c", ""))
+
+# Save the plot as a PNG
+
+ggsave(Plot_VarPart_traits, filename = here("figures", paste0("Plot_jsdm_pa_traits_varpart_", date, ".png")), height = 16, width = 16, units = "cm", dpi = 600)
+
+
+
+
+```
+
+
+
+### Variance partitioning for individual variables
+
+```{r variance partitioning}
+# design matrix
+head(m$X)
+
+m$XFormula
+# Total variance explained by hte model can be partition into the contributions of each fixed effect (or group) and random effect
+# intercept can go in any group. Here in the first to simplify
+# Groups: mouse_char, mouse_dens, environ, farm_animals, landcove, precipitation
+VP_ind <- computeVariancePartitioning(m)
+
+# Save the Variance partitioning info
+VP_ind$vals
+VP_ind$R2T
+
+saveRDS(VP_ind, file = paste0(model_wd, "/jsdm_varpart_ind_", date,".rds"))
+
+
+VP_ind <- readRDS(paste0(model_wd, "/jsdm_varpart_ind_", date,".rds"))
+
+lvl <- c("sex","BMI","Ntrapped","agri","imperv","tcd","swf",
+         "dist_road","dist_path",
+         "cat_dens","pig_dens","pou_dens",
+         "precipitation_aug","air_temp_aug",
+         "Random: spatial_autocorrelation","Random: farm_ID","Random: year")
+
+VP.table_ind <- data.frame(VP_ind$vals) %>%
+  mutate(Factor = rownames(.)) %>%
+  gather(., "ARO", "Variance_Explained", -Factor) %>%
+  mutate(ARO = gsub("\\.", ":", factor(ARO))) %>%
+  left_join(., traits_summary) %>%
+    mutate(Factor = factor(Factor, levels = lvl)) 
+
+
+viridis_cols_ind <- data.frame(colour_grp = setNames(viridis::turbo(length(unique(VP.table_ind$Factor[!grepl("Random", VP.table_ind$Factor)]))),
+                         unique(VP.table_ind$Factor[!grepl("Random", VP.table_ind$Factor)])), Factor = unique(VP.table_ind$Factor[!grepl("Random", VP.table_ind$Factor)]))
+
+
+  
+Mean_VP_ind <- VP.table_ind %>%
+  mutate(Factor = factor(Factor, levels = lvl)) %>%
+  group_by(Factor) %>%
+  summarise(mean_var = round(mean(Variance_Explained), 2)) %>%
+  arrange(Factor) %>% 
+  ungroup() %>%
+  left_join(., viridis_cols_ind) %>%
+  mutate(label = paste0(Factor, "\n", mean_var),
+         ymin = c(0, head(cumsum(mean_var), -1)),
+         ymax = cumsum(mean_var),
+         texty = 1-(ymin + ymax) / 2,
+         colour_grp = ifelse(is.na(colour_grp), "grey20", colour_grp),
+         alpha_group = ifelse(colour_grp=="grey20", 1:5, NA)) 
+
+PLOT_piechart_avg_var_ind <- Mean_VP_ind %>%
+  ggplot(., aes(x = 2, y = mean_var, fill = Factor, alpha = alpha_group)) +
+  geom_bar(stat = "identity", colour = "white") +
+  geom_text_repel(aes(y = texty, label = label, colour = colour_grp), size = 4, family = "Poppins", nudge_x = 1.6) +
+  scale_fill_manual(values = setNames(Mean_VP_ind$colour_grp, Mean_VP_ind$Factor)) +
+  scale_colour_identity() +
+  scale_alpha(range = c(1, 0.4), na.value = 1) +
+  coord_polar(theta = "y", start = 0) +
+  xlim(.5, 4) +
+  theme_void() +
+  theme(legend.position = "none",
+        title = element_text(size = 10, family = "Poppins"),
+        plot.margin = margin(0,0,0,0)) 
+  
+PLOT_piechart_avg_var_ind
+
+ggsave(PLOT_piechart_avg_var_ind, filename = paste0(model_wd, "/Plot_jsdm_VarPar_AVG_IND", date, ".png"), 
+       dpi = 600, height = 13.57, width = 13, units = "cm")
+
+#####
+VP.table_ind <- VP.table_ind %>%
+  left_join(., Mean_VP_ind)
+
+PLOT_VarPart_ind <- VP.table_ind %>%
+  ggplot(aes(x = factor(ARO, levels = ordered_levels), y = Variance_Explained, fill = Factor, alpha = Factor)) +
+  scale_y_continuous(expand = c(0,0)) +
+  geom_bar(stat = "identity", position = "stack", colour = "NA", width = 1) +
+  scale_fill_manual(values = setNames(VP.table_ind$colour_grp, VP.table_ind$Factor)) +
+  scale_alpha_manual(values = setNames(scales::rescale(as.numeric(VP.table_ind$alpha_group), to = c(0.3, 1), from = range(VP.table_ind$alpha_group, na.rm = TRUE)),
+  VP.table_ind$Group_Label)) +
+  guides(fill=guide_legend(ncol=2)) +
+  labs(x = "ARGs", y = "Variance Explained", fill = "", alpha = "") +
+  theme_mg() +
+  coord_flip() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1, size = 8),
+        plot.text = element_text(size = 10)) 
+
+PLOT_VarPart_ind
+
+# Save the faceted plot as a PNG
+ggsave(PLOT_VarPart_ind, filename = paste0(model_wd, "/Plot_jsdm_VarPar_individual_var_", date, ".png"), 
+       dpi = 600, height = 15, width = 34, units = "cm")
+```
+
+
+
+## Species associations
+
+We do it through species associations in residual random variance.   
+One of the strengths of HMSC is its ability to model species associations. You can analyze the species covariance matrix to visualize these associations.  
+
+```{r sp associations}
+OmegaCor <- computeAssociations(m)
+class(OmegaCor)
+saveRDS(OmegaCor, file=paste0(model_wd, "/jsdm_OmegaCor_", date, ".rds"))
+
+# OmegaCor <- readRDS(paste0(model_wd, "/jsdm_OmegaCor_", date, ".rds"))
+
+OmegaCor[[1]]$mean
+OmegaCor[[1]]$support
+
+# Default plot in Hmsc package
+supportLevel <- 0.95
+
+association_values <- data.frame(((OmegaCor[[1]]$support > supportLevel)
+                       + (OmegaCor[[1]]$support < (1 - supportLevel)) > 0) * OmegaCor[[1]]$mean)
+
+PLOT_Cor_ARG_resmech_95 <- ggcorrplot(association_values, method = "square") +
+  labs(colour = "Correlation") +
+  theme_mg_cor() 
+
+PLOT_Cor_ARG_resmech_95
+
+ggsave(paste0(model_wd, "/Plot_jsdm_default_omegaplot95_", date,".png"), PLOT_Cor_ARG_resmech_95, dpi = 600)
+
+##
+supportLevel <- 0.75
+
+association_values <- data.frame(((OmegaCor[[1]]$support > supportLevel)
+                       + (OmegaCor[[1]]$support < (1 - supportLevel)) > 0) * OmegaCor[[1]]$mean)
+
+PLOT_Cor_ARG_resmech_75 <- ggcorrplot(association_values, method = "square") +
+  labs(colour = "Correlation") +
+  theme_mg_cor() 
+
+PLOT_Cor_ARG_resmech_75
+
+ggsave(paste0(model_wd, "/Plot_jsdm_default_omegaplot75_", date,".png"), PLOT_Cor_ARG_resmech_75, dpi = 600)
+
+```
+
+```{r save associations}
+assoc.mean <- melt(OmegaCor[[1]]$mean)
+assoc.support <- melt(OmegaCor[[1]]$support)
+
+nrow(assoc.mean); nrow(assoc.support)
+
+associations <- cbind.data.frame(assoc.mean, support = assoc.support$value)
+colnames(associations) <- c("species1", "species2", "mean", "support")
+
+associations <- associations %>%
+  mutate(species1 = gsub(".", " ", species1, fixed =TRUE),
+         species2 = gsub(".", " ", species2, fixed =TRUE))
+
+write.csv(associations, paste0(model_wd, "/jsdm_species_associations_", date, ".csv"), row.names = FALSE)
+```
+
+
+### Circular plot 
+
+Plot the species associations categorizing the taxa by some grouping characteristic
+We use a Hierarchical edge bundling plot
+
+To create a bundling graph we need a hierarchy that is going to be used for the dendrogram. 
+We add higher categories to our species, grouping them by env response, that we will use later for plotting
+
+We also need to create the edges: data frame giving the hierarchical structure of the species,
+grouped by species group
+
+
+```{r load data}
+# Taxa 
+response <- as.data.frame(m$Y)
+
+## create random grouping as example
+# taxa
+my_groups <- data.frame(species = unique(associations$species1))
+# grouping in three groups, as an example, no need 
+my_groups$group <- factor(rep("1", 340))
+# n sites it was detected
+nsites <- data.frame(species = gsub(".", " ", colnames(response), fixed = TRUE), 
+                     nsites = colSums(response))
+my_groups <- my_groups %>% 
+  left_join(nsites, by = "species")
+
+my_groups
+
+## Get sp names for the plots
+associations$sp1 <- as.character(associations$species1)
+associations$sp2 <- as.character(associations$species2)
+  
+head(associations, 20)  
+
+# Select association that are significant in the 95% CI
+assoc_corr95 <- associations %>%
+  filter(support < 0.025 | support > 0.975) %>%
+  filter(species1 != species2) %>%
+  dplyr::select(from = sp1, to = sp2, mean = mean, support = support) %>%
+  mutate(correl = ifelse(mean < 0, "neg", "pos"))
+
+nrow(assoc_corr95)
+head(assoc_corr95)
+```
+
+```{r prepare hierarchical edge bundling plot}
+# groups
+d1 <- data.frame(from = "origin", to = levels(my_groups$group))
+
+# Then we assign the species to the groups
+d2 <- data.frame(from = my_groups$group, to = my_groups$species)
+edges <- rbind(d1, d2)
+nrow(edges)
+
+## prepare nodes
+#We use the number of sites that the species was detected for the size of the dots
+vertices <- data.frame(name = unique(c(as.character(edges$from), as.character(edges$to))))
+nrow(vertices)
+
+vertices$size <- c(rep(NA, 2), my_groups$nsites)
+vertices$group = edges$from[match( vertices$name, edges$to )]
+head(vertices, 10)
+
+# Reorder the data following the order we are interested in for representation:
+# so all the species in the same group appear together
+edges.ord <- edges[order(edges$from),]
+vertices.ord <- vertices[order(vertices$group,vertices$name),]
+head(vertices.ord, 10)
+
+## calculate the ANGLE of the labels for plotting
+vertices.ord$id=NA
+myleaves <- which(is.na(match(vertices.ord$name, edges.ord$from))) # Select the rows with the final species, not the groups
+nleaves <- length(myleaves) # This should be the number of species
+vertices.ord$id[myleaves] <- seq(1:nleaves)
+
+# First angle to calculate horizontal adjustment
+vertices.ord$angle <- 90 - 360*vertices.ord$id/nleaves
+
+# calculate the alignment of labels: right or left
+# If I am on the left part of the plot, my labels have currently an angle < -90
+vertices.ord$hjust <- ifelse(vertices.ord$angle < -90, 1, 0)
+
+# flip angle BY to make them readable
+vertices.ord$angle <- ifelse(vertices.ord$angle < -90, vertices.ord$angle + 180, vertices.ord$angle)
+
+head(vertices.ord, 10)
+
+vertices.ord <- vertices.ord %>%
+  mutate(name = gsub(".", " ", name, fixed =TRUE))
+
+```
+
+```{r create graph object and plot}
+# give data graph format
+mygraph <- graph_from_data_frame(d = edges.ord, vertices = vertices.ord)
+
+# The connection object must refer to the ids of the leaves:
+from <- match(assoc_corr95$from, vertices.ord$name)
+to <- match(assoc_corr95$to, vertices.ord$name)
+
+# we transform the correlations into positive or negative to better plot
+connections <- assoc_corr95 %>%
+  mutate(correlation = ifelse(mean > 0, "positive", "negative"))
+connections
+
+my.plot <- ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
+  geom_conn_bundle(data = get_con(from = from, to = to, values = connections$correlation), 
+                   alpha = 0.3, width = 1.2, tension = 0.5, aes(colour = factor(values)), 
+                   show.legend = TRUE) +
+  geom_node_text(aes(x = x*1.2, y = y*1.2, filter = leaf, label = name, angle = 0, 
+                     hjust = hjust), size = 3.5, alpha = 0.7, family = "Poppins") +
+  geom_node_point(aes(filter = leaf, x = x*1.07, y = y*1.07, #colour = group, 
+                      size = size, alpha=0.5)) +  
+  #expand_limits(x = c(-3, 3), y = c(-2, 2)) +
+  expand_limits(x = c(-1.5, 1.5)) +
+  # Set the color palette for the edges
+  scale_edge_colour_manual(values = c("positive" = viridis_pal()(2)[1], 
+                                      "negative" = viridis_pal()(2)[2]), 
+                           name = "Association:") +
+  scale_edge_linetype("pointed") +
+  scale_size_continuous(range = c(1,8),
+                        breaks = c(100, 250, 500, 750),
+                        name = "Number of samples:") +
+  guides(size = guide_legend(order = 2),
+         colour = "none",
+         alpha = "none") +
+  # change theme  
+  theme_mg_cor_cir() 
+
+my.plot
+
+ggsave(paste0(model_wd, "/Plot_species_associations_circular_", date, ".png"), plot = my.plot,
+       dpi = 600, width = 15.79, height = 13.33, units = "cm")
+
+```
+

@@ -1,0 +1,325 @@
+---
+title: "2 - Environmental data extraction with mice"
+author: "Morgane Gicquel"
+date: "2025-08-05"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Preliminary data exploration
+
+```{r prepare workspace}
+source("scripts/source_packages.R")
+source("scripts/source_themes_mg.R")
+
+wrkdir <- getwd()
+geoproc_wd <- paste0(wrkdir, "/data/processed/geo")
+
+```
+
+
+### load mice data
+```{r}
+## load mice data
+data_OTU_tmp <- read.csv("./data/raw/OTU_mice_data_filtered_gicquel_202411.csv", row.names = 1) 
+head(data_OTU_tmp)
+
+## select spatial data and transform
+OTU_spatial_data <- data_OTU_tmp %>% 
+  dplyr::select(mouseID, sex, lon, lat, year, bodyweight, bodylength, BMI, HI, loc, batch, Ntrapped)
+
+mice_OTU_sf <- st_as_sf(OTU_spatial_data, coords = c("lon", "lat"), crs = 4326) %>% 
+  st_transform(3035)
+
+#st_write(mice_sf, "./data/processed/tmp_locations_mice_3035_20240918.gpkg", append = FALSE)
+
+#ARG
+
+data_ARG_tmp <- read.csv("./data/raw/ARG_mice_data_filtered_gicquel_202411.csv", row.names = 1) 
+head(data_ARG_tmp)
+
+## select spatial data and transform
+ARG_spatial_data <- data_ARG_tmp %>% 
+  dplyr::select(mouseID, sex, lon, lat, year, bodyweight, bodylength, BMI, HI, loc, batch, Ntrapped)
+
+mice_ARG_sf <- st_as_sf(ARG_spatial_data, coords = c("lon", "lat"), crs = 4326) %>% 
+  st_transform(3035)
+
+
+#ARG_normalised
+
+data_ARG_norm_tmp <- read.csv("./data/raw/ARG_norm_mice_data_filtered_gicquel_202411.csv", row.names = 1) 
+head(data_ARG_norm_tmp)
+
+## select spatial data and transform
+ARG_norm_spatial_data <- data_ARG_norm_tmp %>% 
+  dplyr::select(mouseID, sex, lon, lat, year, bodyweight, bodylength, BMI, HI, loc, batch, Ntrapped)
+
+mice_ARG_norm_sf <- st_as_sf(ARG_norm_spatial_data, coords = c("lon", "lat"), crs = 4326) %>% 
+  st_transform(3035)
+
+```
+
+
+### check data
+```{r}
+mice_sf <- st_read("./data/processed/tmp_locations_mice_3035_20240918.gpkg")
+head(mice_sf)
+
+tmap_mode("view")
+
+tm_shape(mice_sf) +
+  #tm_dots("jS_Batch", size = 2) +
+  tm_dots("jS_year", size = 1) #+
+  #tm_dots("jS_bodyweight", size = 0.5)
+
+```
+
+### load env stack data 100m
+
+```{r}
+
+env_cov <- rast("./data/processed/geo/stack_env_covariates_germany_100m_3035.tif")
+
+names(env_cov)
+
+```
+
+
+
+
+
+### load germany map
+
+```{r}
+template <- env_cov
+res(template) <- c(100, 100)
+
+germany <- st_read("./data/processed/geo/germany_3035.gpkg") %>%
+  rename(region = GEN) %>%
+  rasterize(., template, field="region") 
+
+plot(germany)
+
+  
+```
+
+### check data
+```{r eval=FALSE, include=FALSE}
+## german borders
+german_border <- st_union(germany)
+
+tmap_mode("view")
+
+tm_shape(env_cov$pig_dens) +
+  tm_raster(legend.show = FALSE) +
+  tm_shape(german_border) +
+  tm_borders("red") 
+
+```
+
+
+# Extract values for bacterias
+```{r}
+
+#OTU
+OTU_mice_sf <- terra::extract(env_cov, mice_OTU_sf) %>%
+  left_join(., terra::extract(germany, mice_OTU_sf)) %>%
+  cbind(mice_OTU_sf, .)
+
+head(OTU_mice_sf)
+
+## as data frame
+OTU_mice_data_env100m <- OTU_mice_sf %>% 
+  st_drop_geometry() %>% 
+  as.data.frame() %>%
+  left_join(., data_OTU_tmp)  %>%
+  mutate(agri = ifelse(is.na(agri), 0, agri))
+
+head(OTU_mice_data_env100m)
+
+write.csv(OTU_mice_data_env100m, "./data/processed/Table_OTU_mice_envcov_100m_202507.csv", row.names = FALSE)
+
+```
+
+# Extract values for ARGs
+
+```{r}
+
+#ARG
+ARG_mice_sf <- terra::extract(env_cov, mice_ARG_sf) %>%
+  left_join(., terra::extract(germany, mice_ARG_sf)) %>%
+  cbind(mice_ARG_sf, .)
+
+head(ARG_mice_sf)
+
+## as data frame
+ARG_mice_data_env100m <- ARG_mice_sf %>% 
+  st_drop_geometry() %>% 
+  as.data.frame() %>%
+  left_join(., data_ARG_tmp) %>%
+  mutate(agri = ifelse(is.na(agri), 0, agri))
+
+
+head(ARG_mice_data_env100m)
+
+write.csv(ARG_mice_data_env100m, "./data/processed/Table_ARG_mice_envcov_100m_202507.csv", row.names = FALSE)
+
+
+
+```
+
+
+
+# Extract values for ARGs abd normalised
+
+```{r}
+#ARG_normalised
+ARG_norm_mice_sf <- terra::extract(env_cov, mice_ARG_norm_sf) %>%
+  left_join(., terra::extract(germany, mice_ARG_norm_sf)) %>%
+  cbind(mice_ARG_norm_sf, .)
+
+head(ARG_norm_mice_sf)
+
+## as data frame
+ARG_norm_mice_data_env100m <- ARG_norm_mice_sf %>% 
+  st_drop_geometry() %>% 
+  as.data.frame() %>%
+  left_join(., data_ARG_norm_tmp) %>%
+  mutate(agri = ifelse(is.na(agri), 0, agri))
+
+head(ARG_norm_mice_data_env100m)
+
+write.csv(ARG_norm_mice_data_env100m, "./data/processed/Table_ARG_norm_mice_envcov_100m_202507.csv", row.names = FALSE)
+
+```
+
+
+
+# Explore values
+
+```{r variable correlation}
+## get correlations
+correlations_table <- data.frame(ARG_mice_sf) %>% 
+  dplyr::select(-mouseID, -sex, -clc, -clc_fct, -gem_char, -region, -geometry) %>%
+  mutate_all(., function(x) as.numeric(as.character(x)))
+
+cor_mice <- cor(correlations_table, use = "pairwise.complete.obs")
+
+RColorBrewer::brewer.pal(n = 8, name = "RdBu")
+
+mycorplot <- ggcorrplot::ggcorrplot(cor_mice, 
+                       type = "lower", 
+                       outline.color = "white",
+                       lab = TRUE,
+                       ggtheme = ggplot2::theme_minimal,
+                       # ggtheme = ggplot2::theme(axis.line = element_line(col = "black")),
+                       # colors = c("#6D9EC1", "white", "#E46726")) +
+                       colors = c("#B2182B", "white", "#2166AC")) +
+  theme(axis.line = element_line(colour = "black"), 
+        plot.background = element_rect(colour = "transparent", fill = "white"))
+  
+mycorplot
+
+ggsave(plot = mycorplot, 
+       filename = "./output/plots/mice_envcov_correlations.png", 
+       dpi = 600, width = 6, height = 6)
+
+```
+
+```{r variable correlation climatic}
+## get correlations
+reduced_correlations_table <- data.frame(ARG_mice_sf) %>% 
+  dplyr::select(-mouseID, -sex, -clc, -clc_fct, -gem_char, -region, -geometry) %>%
+  dplyr::select(temp_aug_2015, temp_aug_2016, temp_aug_2017, temp_aug_2018, temp_aug_2019, temp_aug_2021, temp_aug_2022,
+                prec_aug_2015, prec_aug_2016, prec_aug_2017, prec_aug_2018, prec_aug_2019, prec_aug_2021, prec_aug_2022)
+
+reduced_cor_mice <- cor(reduced_correlations_table, use = "pairwise.complete.obs")
+
+RColorBrewer::brewer.pal(n = 8, name = "RdBu")
+
+mycorplot_reduced <- ggcorrplot::ggcorrplot(reduced_cor_mice, 
+                       type = "lower", 
+                       outline.color = "white",
+                       lab = TRUE,
+                       ggtheme = ggplot2::theme_minimal,
+                       # ggtheme = ggplot2::theme(axis.line = element_line(col = "black")),
+                       # colors = c("#6D9EC1", "white", "#E46726")) +
+                       colors = c("#B2182B", "white", "#2166AC")) +
+  theme(axis.line = element_line(colour = "black"), 
+        plot.background = element_rect(colour = "transparent", fill = "white"))
+  
+mycorplot_reduced
+
+ggsave(plot = mycorplot_reduced, 
+       filename = "./output/plots/mice_envcov_correlations_climatic.png", 
+       dpi = 600, width = 6, height = 6)
+
+```
+
+```{r explore values}
+
+hist(data.frame(ARG_mice_sf)$pig_dens)
+hist(data.frame(ARG_mice_sf)$pou_dens)
+hist(data.frame(ARG_mice_sf)$cat_dens)
+
+cov_mice_long <- data.frame(ARG_mice_sf) %>% 
+  mutate(clc_fct = as.numeric(as.character(clc_fct))) %>%
+  pivot_longer(cols = !c(mouseID, sex, clc, gem_char), 
+               names_to = "variable")
+
+head(cov_mice_long, 20)
+
+## all numerical values
+ggplot(cov_mice_long, aes(x = variable, y = value)) +
+  geom_boxplot()
+
+## distances
+(plotdist <- cov_mice_long %>%
+    filter(variable %in% c("dist_path", "dist_road")) %>%
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#CC99CC", "#996699")) +
+    xlab("") +
+    ylab("Distance (m)") +
+    theme_mg())
+
+## covers
+(plotcover <- cov_mice_long %>%
+    filter(variable %in% c("tcd", "swf", "imperv")) %>%
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#999999", "#669900",  "#336600")) +
+    xlab("") +
+    ylab("Cover (%)") +
+    theme_mg())
+
+## livestock density
+(plotlivestock <- cov_mice_long %>% 
+  filter(variable %in% c("cat_dens", "pig_dens", "pou_dens")) %>% 
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#993300", "#CC6600",  "#FFCC99")) +
+    xlab("") +
+    ylab("Livestock units / ha") +
+    ylim(0, 10) +
+    theme_mg())
+
+
+allplots <- ggarrange(plotdist, plotcover, plotlivestock, 
+          labels = c("a", "b", "c"),
+          ncol = 2, nrow = 2)
+
+ggsave(plot = allplots, 
+       filename = "./output/plots/mice_envcov_rawvalues.png", 
+       dpi = 600, width = 12, height = 10)
+
+```
+
+
+

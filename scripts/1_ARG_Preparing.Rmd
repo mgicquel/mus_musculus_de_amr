@@ -1,0 +1,626 @@
+---
+title: "1 - Preparing and Exploring Variables in ARG data"
+author: "Morgane Gicquel"
+date: "2025-08-05"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r prepare workspace}
+source("scripts/source_packages.R")
+source("scripts/source_themes_mg.R") # ggplot2 themes
+
+wrkdir <- getwd()
+output_wd <- paste0(wrkdir, "/output")
+geoproc_wd <- paste0(wrkdir, "/data/processed/geo")
+```
+
+# Loading data files
+
+## Taxonomic profile results
+PS.mOTUS.rds  
+  otu_table: Matrix with raw read counts per mOTU per sample (Mus musculus)  
+  tax_table: Matrix with full taxonomy by mOTU  
+  sam_table: Unified metadata for all samples  
+  
+## ARG profile results
+PS.ARG.raw.rds  
+  otu_table: Matrix with raw read counts per ARG per sample (Mus musculus)  
+  tax_table: Matrix with full ARG annotation  
+  sam_table: Unified metadata for all samples  
+  
+PS.ARG.FPKM.rds  
+  otu_table: Matrix with ARG counts normalized to fragments per kilobase per million mapped reads per sample (Mus musculus)  
+  tax_table: Matrix with full ARG annotation  
+  sam_table: Unified metadata for all samples  
+
+Best to use FPKM as corrected for genes lengths.
+
+
+```{r load data}
+
+# Filtered data
+
+PS.mOTUS.filt <- readRDS("./data/raw/PS.mOTUS.filtered.rds")
+
+PS.ARG.raw.filt <- readRDS("./data/raw/PS.ARG.filtered.rds")
+
+PS.ARG.FPKM.filt <- readRDS("./data/raw/PS.ARG.FPKM.filtered.rds")
+
+```
+
+# Bacteria
+
+### Cleaning up NA in Taxa table
+```{r}
+
+PS.mOTUS.filt
+
+# let's clean up genus column in the tax table
+
+tax <- as.data.frame(tax_table(PS.mOTUS.filt)) %>%
+  mutate(
+    Phylum = ifelse(str_detect(Phylum, "NA"), NA, Phylum),
+    Class = ifelse(str_detect(Class, "NA"), NA, Class),
+    Order = ifelse(str_detect(Order, "NA"), NA, Order),
+    Family = ifelse(str_detect(Family, "NA"), NA, Family),
+    Genus = ifelse(str_detect(Genus, "NA"), NA, Genus),
+    Species = ifelse(str_detect(Species, "NA"), NA, Species)) %>%
+  mutate(Genus = ifelse(is.na(Genus) | Genus == "Unknown_genus_in_NA", paste0("Unknown_genus_in_", coalesce(Family, Order, Class, Phylum, Kingdom)), Genus)) %>% 
+  mutate(Family = ifelse(is.na(Family) | Family == "Unknown_family_in_NA", NA, Family)) %>%
+   mutate(Phylum = ifelse(is.na(Phylum), "Unknown_phylum", Phylum),
+          Class = ifelse(is.na(Class), "Unknown_class", Class),
+          Order = ifelse(is.na(Order), "Unknown_order", Order),
+          Genus = ifelse(Genus == "uncultured", paste(Order, Genus, sep = "_"), Genus))
+
+PS.mOTUS.filt@tax_table <- tax_table(as.matrix(tax))
+
+family <- get_taxa_unique(PS.mOTUS.filt, "Family")
+family
+
+#View(PS.mOTUS.filt@tax_table)
+
+length(unique(tax_table(PS.mOTUS.filt)[,"Family"]))
+
+```
+
+## Preparing
+
+```{r prepare data}
+## N mice trapped per location
+
+aggregateDensity <- unclass(sample_data(PS.mOTUS.filt)) %>%
+    ## need to remove class "sample_data" (phyloseq)
+    as_tibble() %>%
+    ## need to remove NA the same data 
+    filter(!is.na(Body_Length)) %>% 
+    ## creating Locality variable
+    mutate(Locality = paste(round(Latitude,4), " ", round(Longitude,4))) %>%
+    ## add total mice trapped per locality and year  
+    group_by(Locality, Year) %>%
+    ## Number of mice trapped at one locality (combined long/lat at
+    ## 4-digit resolution, available in "Locality"). We processed all
+    ## mice for each locality. We create the variable per year to
+    ## estimate density at one point in time. Hypothesis: as measure
+    ## of host population density this indicates increase transmission
+    ## between mice. More host-associated transmissible taxa will be
+    ## enriched. Potential alternatives not considered now:
+    ## collapsing localities at larger scale (more rounding),
+    ## persistent density over years for those)
+    summarise(Ntrapped = n())  
+
+
+## filter NAs and select variables
+
+allSData <- unclass(sample_data(PS.mOTUS.filt)) %>%
+    ## need to remove class "sample_data" (phyloseq)
+    as_tibble() %>%
+    ## mice needing to be dropped because of NA values (might be
+    ## worthwhile to imput this at some point, "Status" could be most
+    filter(!is.na(Body_Length)) %>% 
+    ## add here other variable that could need filtering if included
+    ## SELECTION FOR NOW:
+    ## Latitude and longitude: the basic spatial coordinates, decimal
+    ## format, rounded to 4 digits
+    ## creating Locality variable
+    mutate(Locality = paste(round(Latitude,4), " ", round(Longitude,4)),
+           farm_ID = as.integer(factor(Locality))) %>%
+    mutate(mouseID = Mouse_ID,
+           sex = Sex, 
+           lon = Longitude, 
+           lat = Latitude, 
+           ## year: the year of sampling, hypothesis: closer years are more
+           ## similar as a result of community persistence or similarity of
+           ## environmental condition in closer years.
+           year = as.integer(Year),
+           ## BMI: the residuals of body weight on body
+           ## length. Hypothesis: mice with worse body condition have
+           ## disturbed microbiomes either as a cause or consequence
+           ## of bad health. Might be worthwhile to consider plain
+           ## weight or lenght as a proxy for age?! It'd be actually
+           ## btter to use tail lenght for that, but not for now...
+           bodyweight = Body_Weight,
+           bodylength = Body_Length,
+           BMI = residuals(lm(Body_Weight~Body_Length, data = .)),
+           ## HI, the hybrid index. Hypothesis: "disturbed"
+           ## microbiomes (especially mycobiomes) in hybrids as
+           ## observed previously.
+           HI = HI,
+           ## Remark: All species interaction hypotheses
+           ## (e.g. parasite infections, which would be available as
+           ## derived sample variables) should be addressed as part of
+           ## the response variable
+           loc = Locality,
+           batch = Batch) %>%
+    full_join(aggregateDensity) %>%
+  dplyr::select(mouseID, sex, lon, lat, year, bodyweight, bodylength, BMI, HI, loc, farm_ID, batch, Ntrapped, observed_arg, chao1_arg, shannon_arg, simpson_eve_arg,
+                simpson_dom_arg)
+
+colnames(allSData)
+
+head(allSData)
+```
+
+### feed it back into the core data set after dropping the same NA mice as for the sample data
+
+```{r}
+PS.mOTUS.filt_jS <- subset_samples(PS.mOTUS.filt, !is.na(Body_Length))
+PS.mOTUS.filt_jS@sam_data <- sample_data(allSData)
+
+## check phyloseq object is correct
+sample_names(PS.mOTUS.filt_jS@otu_table)
+sample_names(PS.mOTUS.filt_jS@sam_data)
+
+## make sure the sample names are the same for the sample_data and otu_table. We use the jS_mouseID column
+sample_names(PS.mOTUS.filt_jS@sam_data) <- PS.mOTUS.filt_jS@sam_data$mouseID
+sample_names(PS.mOTUS.filt_jS@otu_table) <- PS.mOTUS.filt_jS@sam_data$mouseID
+
+```
+
+
+Save processed OTU 
+```{r}
+saveRDS(PS.mOTUS.filt_jS, "./data/processed/PS.OTU.filt_jS.rds")
+# PS.mOTUS_jS <- readRDS("./data/processed/PS.OTU_jS.rds")
+```
+
+
+### get only the selected variables
+```{r}
+## get selected variables
+miceData <- unclass(sample_data(PS.mOTUS.filt_jS)) %>% 
+  as_tibble() 
+
+head(miceData)
+nrow(miceData)
+# [1] 858 mice
+```
+
+### check for missing coordinates in data
+```{r}
+summary(miceData)
+
+miceData %>% 
+  filter(is.na(lon))
+
+head(miceData)
+nrow(miceData)
+```
+No missing coordinates
+
+### Save this data for later merging to the environmental covariates
+```{r}
+
+write.csv(miceData, "./data/raw/OTU_mice_data_filtered_gicquel_202411.csv")
+
+```
+
+## Exploring OTU
+
+### load data
+```{r}
+# microbiome bacteria data
+PS.OTU.filt_jS <- readRDS("./data/processed/PS.OTU.filt_jS.rds")
+PS.OTU.filt_jS
+
+#OTU
+#View(otu_table(PS.OTU.filt_jS))
+
+#mice
+sample_names(PS.OTU.filt_jS)
+sample_variables(PS.OTU.filt_jS)
+
+#View(sample_data(PS.OTU.filt_jS))
+
+#taxa
+taxa_names(PS.OTU.filt_jS)
+taxa_sums(PS.OTU.filt_jS)
+tax_table(PS.OTU.filt_jS)
+
+#View(tax_table(PS.OTU.filt_jS))
+
+## filter data for bacteria
+PS_bacteria <- subset_taxa(PS.OTU.filt_jS, Kingdom == "Bacteria")
+
+#View(PS_bacteria@otu_table)
+
+#View(PS_bacteria@tax_table)
+
+## get data at family level
+rank_names(PS_bacteria)[5]
+PS_bacteria_fam <- tax_glom(PS_bacteria, taxrank = rank_names(PS_bacteria)[5])
+PS_bacteria_fam
+
+## 60 bacteria families in previous sample group
+## 49 bacteria Families in 847 mice
+
+## get data at Phylum level
+rank_names(PS_bacteria)[2]
+PS_bacteria_phyl <- tax_glom(PS_bacteria, taxrank = rank_names(PS_bacteria)[2])
+PS_bacteria_phyl
+## 12 bacteria phylum in 847 mice
+
+## get data at Class level
+rank_names(PS_bacteria)[3]
+PS_bacteria_class <- tax_glom(PS_bacteria, taxrank = rank_names(PS_bacteria)[3])
+PS_bacteria_class
+## 23 bacteria classes in 847 mice
+
+## get data at species level
+rank_names(PS_bacteria)[7]
+PS_bacteria_sp <- tax_glom(PS_bacteria, taxrank = rank_names(PS_bacteria)[7])
+PS_bacteria_sp
+## 146 bacteria species in 847 mice
+
+
+```
+
+49 bacteria families in the 858 mice (sample)
+23 bacteria classes
+12 bacteria phylums
+146 bacteria species
+
+# ARG data
+
+## ARG.raw
+
+Three mice individuals are filtered out:  
+- AA_0266: 1 ARG identified
+- SK_3209: 0 ARG identified
+- AA_0444: 0 ARG identified
+
+### Cleaning up NA in Taxa table
+```{r}
+
+PS.ARG.raw.filt 
+
+# let's clean up genus column in the tax table
+
+tax <- as.data.frame(tax_table(PS.ARG.raw.filt))
+
+tax <- as.data.frame(tax_table(PS.ARG.raw.filt)) %>%
+  mutate(
+    AMR_gene_family = ifelse(str_detect(AMR_gene_family, "^NA$|^!RNA$"), NA, AMR_gene_family),
+    Variant = ifelse(str_detect(Variant, "NA"), NA, Variant),
+    Resistance_Mechanism = ifelse(str_detect(Resistance_Mechanism, "NA"), NA, Resistance_Mechanism),
+    ARG = ifelse(str_detect(ARG, "^NA$|^!RNA$"), NA, ARG),
+    ARG_CARD = ifelse(str_detect(ARG_CARD, "^NA$|^!RNA$"), NA, ARG_CARD),
+    ARG_CARD_Short = ifelse(str_detect(ARG_CARD_Short, "^NA$|^!RNA$"), NA, ARG_CARD_Short)
+  ) 
+
+
+PS.ARG.raw.filt@tax_table <- tax_table(as.matrix(tax))
+
+#View(PS.ARG.raw.filt@tax_table)
+
+length(unique(tax_table(PS.ARG.raw.filt)[,"Variant"]))
+
+```
+
+
+### Prepare ARG
+
+```{r prepare data}
+## N mice trapped per location
+
+aggregateDensity <- unclass(sample_data(PS.ARG.raw.filt)) %>%
+    ## need to remove class "sample_data" (phyloseq)
+    as_tibble() %>%
+    ## need to remove NA the same data 
+    filter(!is.na(Body_Length)
+           #, !is.na(HI)
+           ) %>% 
+    ## creating Locality variable
+    mutate(Locality = paste(round(Latitude,4), " ", round(Longitude,4))) %>%
+    ## add total mice trapped per locality and year  
+    group_by(Locality, Year) %>%
+    ## Number of mice trapped at one locality (combined long/lat at
+    ## 4-digit resolution, available in "Locality"). We processed all
+    ## mice for each locality. We create the variable per year to
+    ## estimate density at one point in time. Hypothesis: as measure
+    ## of host population density this indicates increase transmission
+    ## between mice. More host-associated transmissible taxa will be
+    ## enriched. Potential alternatives not considered now:
+    ## collapsing localities at larger scale (more rounding),
+    ## persistent density over years for those)
+    summarise(Ntrapped = n())  
+
+
+## filter NAs and select variables
+allSData <- unclass(sample_data(PS.ARG.raw.filt)) %>%
+    ## need to remove class "sample_data" (phyloseq)
+    as_tibble() %>%
+    ## mice needing to be dropped because of NA values (might be
+    ## worthwhile to imput this at some point, "Status" could be most
+    filter(!is.na(Body_Length)
+           #, !is.na(HI)
+           ) %>% 
+    ## add here other variable that could need filtering if included
+    ## SELECTION FOR NOW:
+    ## Latitude and longitude: the basic spatial coordinates, decimal
+    ## format, rounded to 4 digits
+    ## creating Locality variable
+    mutate(Locality = paste(round(Latitude,4), " ", round(Longitude,4)),
+           farm_ID = as.integer(factor(Locality))) %>%
+    mutate(mouseID = Mouse_ID,
+           sex = Sex, 
+           lon = Longitude, 
+           lat = Latitude, 
+           ## year: the year of sampling, hypothesis: closer years are more
+           ## similar as a result of community persistence or similarity of
+           ## environmental condition in closer years.
+           year = as.integer(Year),
+           ## BMI: the residuals of body weight on body
+           ## length. Hypothesis: mice with worse body condition have
+           ## disturbed microbiomes either as a cause or consequence
+           ## of bad health. Might be worthwhile to consider plain
+           ## weight or lenght as a proxy for age?! It'd be actually
+           ## btter to use tail lenght for that, but not for now...
+           bodyweight = Body_Weight,
+           bodylength = Body_Length,
+           BMI = residuals(lm(Body_Weight~Body_Length, data = .)),
+           ## HI, the hybrid index. Hypothesis: "disturbed"
+           ## microbiomes (especially mycobiomes) in hybrids as
+           ## observed previously.
+           HI = HI,
+           ## Remark: All species interaction hypotheses
+           ## (e.g. parasite infections, which would be available as
+           ## derived sample variables) should be addressed as part of
+           ## the response variable
+           loc = Locality,
+           batch = Batch) %>%
+    full_join(aggregateDensity) %>%
+  dplyr::select(mouseID, sex, lon, lat, year, bodyweight, bodylength, BMI, HI, loc, farm_ID, batch, Ntrapped, observed_arg, chao1_arg, shannon_arg, simpson_eve_arg,
+                simpson_dom_arg)
+
+head(allSData)
+```
+
+### feed it back into the core data set after dropping the same NA mice as for the sample data
+```{r}
+PS.ARG.raw.filt_jS <- subset_samples(PS.ARG.raw.filt, !is.na(Body_Length))
+PS.ARG.raw.filt_jS@sam_data <- sample_data(allSData)
+
+## check phyloseq object is correct
+sample_names(PS.ARG.raw.filt_jS@otu_table)
+sample_names(PS.ARG.raw.filt_jS@sam_data)
+
+## make sure the sample names are the same for the sample_data and otu_table. We use the jS_mouseID column
+sample_names(PS.ARG.raw.filt_jS@sam_data)<- PS.ARG.raw.filt_jS@sam_data$mouseID
+sample_names(PS.ARG.raw.filt_jS@otu_table)<- PS.ARG.raw.filt_jS@sam_data$mouseID
+
+PS.ARG.raw.filt_jS
+
+saveRDS(PS.ARG.raw.filt_jS, "./data/processed/PS.ARG.raw.filt_jS.rds")
+```
+
+
+### get only the selected variables
+```{r}
+## get selected variables
+miceData <- unclass(sample_data(PS.ARG.raw.filt_jS)) %>% 
+  as_tibble() 
+
+head(miceData)
+nrow(miceData)
+# [1] 859 mice
+```
+
+### check for missing coordinates in data
+```{r}
+summary(miceData)
+
+miceData %>% 
+  filter(is.na(lon))
+
+head(miceData)
+nrow(miceData)
+```
+No missing coordinates
+
+### Save this data for later merging to the environmental covariates
+```{r}
+
+write.csv(miceData, "./data/raw/ARG_mice_data_filtered_gicquel_202411.csv")
+
+```
+
+
+# ARG data - normalized
+
+ARG normalized count
+
+Three mice individuals are filtered out:  
+- AA_0266: 1 ARG identified
+- SK_3209: 0 ARG identified
+- AA_0444: 0 ARG identified
+- SK_3018: 1 ARG identified
+
+
+### Cleaning up NA in Taxa table
+```{r}
+
+PS.ARG.FPKM.filt
+
+# let's clean up genus column in the tax table
+
+tax <- as.data.frame(tax_table(PS.ARG.FPKM.filt))
+
+tax <- as.data.frame(tax_table(PS.ARG.FPKM.filt)) %>%
+  mutate(
+    AMR_gene_family = ifelse(str_detect(AMR_gene_family, "^NA$|^!RNA$"), NA, AMR_gene_family),
+    Variant = ifelse(str_detect(Variant, "NA"), NA, Variant),
+    Resistance_Mechanism = ifelse(str_detect(Resistance_Mechanism, "NA"), NA, Resistance_Mechanism),
+    ARG = ifelse(str_detect(ARG, "^NA$|^!RNA$"), NA, ARG),
+    ARG_CARD = ifelse(str_detect(ARG_CARD, "^NA$|^!RNA$"), NA, ARG_CARD),
+    ARG_CARD_Short = ifelse(str_detect(ARG_CARD_Short, "^NA$|^!RNA$"), NA, ARG_CARD_Short)
+  ) 
+
+
+PS.ARG.FPKM.filt@tax_table <- tax_table(as.matrix(tax))
+
+#View(PS.ARG.raw@tax_table)
+
+length(unique(tax_table(PS.ARG.FPKM.filt)[,"Variant"]))
+#81 variants
+
+```
+
+
+## Prepare ARG
+
+```{r prepare data}
+## N mice trapped per location
+
+aggregateDensity <- unclass(sample_data(PS.ARG.FPKM.filt)) %>%
+    ## need to remove class "sample_data" (phyloseq)
+    as_tibble() %>%
+    ## need to remove NA the same data 
+    filter(!is.na(Body_Length)
+           #, !is.na(HI)
+           ) %>% 
+    ## creating Locality variable
+    mutate(Locality = paste(round(Latitude,4), " ", round(Longitude,4))) %>%
+    ## add total mice trapped per locality and year  
+    group_by(Locality, Year) %>%
+    ## Number of mice trapped at one locality (combined long/lat at
+    ## 4-digit resolution, available in "Locality"). We processed all
+    ## mice for each locality. We create the variable per year to
+    ## estimate density at one point in time. Hypothesis: as measure
+    ## of host population density this indicates increase transmission
+    ## between mice. More host-associated transmissible taxa will be
+    ## enriched. Potential alternatives not considered now:
+    ## collapsing localities at larger scale (more rounding),
+    ## persistent density over years for those)
+    summarise(Ntrapped = n())  
+
+
+## filter NAs and select variables
+allSData <- unclass(sample_data(PS.ARG.FPKM.filt)) %>%
+    ## need to remove class "sample_data" (phyloseq)
+    as_tibble() %>%
+    ## mice needing to be dropped because of NA values (might be
+    ## worthwhile to imput this at some point, "Status" could be most
+    filter(!is.na(Body_Length)
+           #, !is.na(HI)
+           ) %>% 
+    ## add here other variable that could need filtering if included
+    ## SELECTION FOR NOW:
+    ## Latitude and longitude: the basic spatial coordinates, decimal
+    ## format, rounded to 4 digits
+    ## creating Locality variable
+    mutate(Locality = paste(round(Latitude,4), " ", round(Longitude,4))) %>%
+    mutate(mouseID = Mouse_ID,
+           sex = Sex, 
+           lon = Longitude, 
+           lat = Latitude, 
+           ## year: the year of sampling, hypothesis: closer years are more
+           ## similar as a result of community persistence or similarity of
+           ## environmental condition in closer years.
+           year = as.integer(Year),
+           ## BMI: the residuals of body weight on body
+           ## length. Hypothesis: mice with worse body condition have
+           ## disturbed microbiomes either as a cause or consequence
+           ## of bad health. Might be worthwhile to consider plain
+           ## weight or lenght as a proxy for age?! It'd be actually
+           ## btter to use tail lenght for that, but not for now...
+           bodyweight = Body_Weight,
+           bodylength = Body_Length,
+           BMI = residuals(lm(Body_Weight~Body_Length, data = .)),
+           ## HI, the hybrid index. Hypothesis: "disturbed"
+           ## microbiomes (especially mycobiomes) in hybrids as
+           ## observed previously.
+           HI = HI,
+           ## Remark: All species interaction hypotheses
+           ## (e.g. parasite infections, which would be available as
+           ## derived sample variables) should be addressed as part of
+           ## the response variable
+           loc = Locality,
+           batch = Batch) %>%
+    full_join(aggregateDensity) %>%
+  dplyr::select(mouseID, sex, lon, lat, year, bodyweight, bodylength, BMI, HI, loc, batch, Ntrapped, observed_arg, chao1_arg, shannon_arg, simpson_eve_arg,
+                simpson_dom_arg)
+
+head(allSData)
+```
+
+### feed it back into the core data set after dropping the same NA mice as for the sample data
+```{r}
+PS.ARG.FPKM.filt_jS <- subset_samples(PS.ARG.FPKM.filt, !is.na(Body_Length))
+PS.ARG.FPKM.filt_jS@sam_data <- sample_data(allSData)
+
+## check phyloseq object is correct
+sample_names(PS.ARG.FPKM.filt_jS@otu_table)
+sample_names(PS.ARG.FPKM.filt_jS@sam_data)
+
+## make sure the sample names are the same for the sample_data and otu_table. We use the jS_mouseID column
+sample_names(PS.ARG.FPKM.filt_jS@sam_data)<- PS.ARG.FPKM.filt_jS@sam_data$mouseID
+sample_names(PS.ARG.FPKM.filt_jS@otu_table)<- PS.ARG.FPKM.filt_jS@sam_data$mouseID
+
+PS.ARG.FPKM.filt_jS
+
+saveRDS(PS.ARG.FPKM.filt_jS, "./data/processed/PS.ARG.FPKM.filt_jS.rds")
+```
+
+
+### get only the selected variables
+```{r}
+## get selected variables
+miceData <- unclass(sample_data(PS.ARG.FPKM.filt_jS)) %>% 
+  as_tibble() 
+
+head(miceData)
+nrow(miceData)
+# [1] 847 mice
+```
+
+### check for missing coordinates in data
+```{r}
+summary(miceData)
+
+miceData %>% 
+  filter(is.na(lon))
+
+head(miceData)
+nrow(miceData)
+```
+No missing coordinates
+
+
+### Save this data for later merging to the environmental covariates
+```{r}
+
+write.csv(miceData, "./data/raw/ARG_norm_mice_data_filtered_gicquel_202411.csv")
+
+```
+
+
+
+
+
+

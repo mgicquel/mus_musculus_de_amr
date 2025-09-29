@@ -1,0 +1,1326 @@
+---
+title: "3 - Preparing and Exploring Variables in ARG data"
+author: "Morgane Gicquel"
+date: "2025-08-05"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, 
+                      dpi = 600, out.width = 100, out.height = 100, fig.width = 6)
+```
+
+```{r prepare workspace}
+setwd("D:/PopDynCloud/Projects/mus_musculus_de_amr_gicquel_m")
+wrkdir <- getwd()
+
+source("scripts/source_packages.R")
+source("scripts/source_themes_mg.R")
+source("scripts/source_api.R")
+
+output_wd <- paste0(wrkdir, "/output")
+geoproc_wd <- paste0(wrkdir, "/data/processed/geo")
+```
+
+```{r}
+# ARG
+PS.ARG <- readRDS(paste0(wrkdir,"/data/processed/PS.ARG.raw_jS.rds"))
+
+# Environmental covariates
+ARG_envcov <- read.csv(paste0(wrkdir,"/data/processed/Table_ARG_mice_envcov_100m_202409.csv"))
+
+```
+
+```{r}
+
+PS.ARG@sam_data <- sample_data(ARG_envcov)
+
+```
+
+```{r include=FALSE}
+#mice
+sample_names(PS.ARG)
+sample_variables(PS.ARG)
+
+#View(sample_data(PS.ARG))
+
+#taxa
+taxa_names(PS.ARG)
+taxa_sums(PS.ARG)
+tax_table(PS.ARG)
+
+###
+data_ARG <- psmelt(PS.ARG)
+```
+
+# Samples location
+
+This map shows two major hotspots of sampling locations: one around Berlin-Brandenburg and another in Bavaria.  
+Most of the samples were collected in north-east Brandenburg.
+
+```{r}
+# get background map
+map <- get_googlemap("Germany", zoom = 6, maptype = "terrain")
+#map <- get_stadiamap(bbox = c(left = 7, bottom = 47, right = 15, top = 55), zoom = 8, maptype = "stamen_toner_lite")
+
+data_aggr <- data_ARG %>%
+  dplyr::select(-c(1:3,45:50)) %>%
+  distinct()
+
+MAP_samples_density <- ggmap(map) +
+  scale_x_continuous(breaks = seq(9,15,1), limits = c(9,15)) +
+  scale_y_continuous(breaks = seq(48,55,1), limits = c(48,54.2)) +
+  stat_density2d(data = data_aggr, aes(fill = ..level..), h = 0.5, n = 300, alpha = 0.5, geom = "polygon") + 
+  geom_point(data = data_aggr, aes(x = lon, y = lat), size = 1, alpha = 0.2) + 
+  scale_fill_viridis_c() +
+  coord_equal() + 
+  labs(y = "Latitude", x = "Longitude", title = "") +
+  theme_mg()
+
+MAP_samples_density
+```
+
+# Summary of information in OTUs data
+
+After filtering and removing samples with missing values: 
+755 samples / mice  
+
+590 Taxa  
+
+82 families   
+21 phylum  
+42 classes  
+
+Missing information for Hybridization Index for 2022  
+Missing sex for sample AA_0967
+
+# ARG data
+
+## Taxonomic groups
+
+There are 3 samples/mice with zero/one ARG:  
+- AA_0266: 1 ARG identified  
+- SK_3209: 0 ARG identified  
+- AA_0444: 0 ARG identified  
+
+After filtering (same as for the OTUs): 
+756 samples/mice  
+
+169 taxa  
+
+53 ARG's families  
+94 variants  
+96 resistance mechanisms (6 different)
+
+## Exploration
+
+There does not seem to have a clusters of high richness of ARG.
+
+```{r}
+MAP_ARG_richness <- ggmap(map) +
+  scale_x_continuous(breaks = seq(9,15,1), limits = c(9,15)) +
+  scale_y_continuous(breaks = seq(48,55,1), limits = c(48,54.2)) +
+  geom_point(data = data_aggr, aes(x = lon, y = lat, colour = observed_arg), size = 2, alpha = 0.6) + 
+  scale_colour_viridis_c() +
+  coord_equal() + 
+  labs(y = "Latitude", x = "Longitude", colour = "") +
+  theme_mg()
+
+MAP_ARG_richness
+```
+
+### Abundance
+
+Some ARG have a high average abundance, while some are really rare.
+
+```{r}
+ARG_avg_abundance <- data_ARG %>%
+  group_by(OTU) %>%
+  summarise(Abd_ARG = mean(Abundance)) %>%
+  arrange(desc(Abd_ARG)) 
+
+PLOT_ARG_avg_abundance <- ARG_avg_abundance %>%
+  ggplot(aes(x = OTU, y = Abd_ARG)) +
+  scale_y_continuous(breaks = seq(0,12000,1000)) +
+  scale_colour_viridis(discrete = T) +
+  geom_bar(stat = "identity", position = "stack", fill = "#440154FF") +  # Stacked bar plot by ARG category
+  labs(y = "Abundance", x = "ARG", title = "", colour = "") +
+  theme_mg() +
+  theme(axis.text.x = element_blank())
+
+PLOT_ARG_avg_abundance
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_sample_year.png"), PLOT_ARG_richness_sample_year, dpi = 600) 
+```
+
+
+```{r}
+data_ARG %>%
+  group_by(OTU, AMR_gene_family, Variant, Resistance_Mechanism) %>%
+  summarise(Abd_ARG = round(mean(Abundance), 0)) %>%
+  arrange(desc(Abd_ARG)) %>%
+  filter(Abd_ARG > 1000) %>%
+  dplyr::select("ARG" = OTU, 
+                "AMR gene family" = AMR_gene_family,
+                "Variant" = Variant,
+                "Resistance mechanism" = Resistance_Mechanism,
+                "Average abundance" = Abd_ARG) %>%
+  flextable() %>%  
+  theme_zebra() %>% 
+  autofit() %>% 
+  set_table_properties(layout = "autofit")
+```
+
+Most abundant ARGs have a antibiotic target alteration resistance mechanism.
+
+### Richness over years
+
+ARG richness of samples over the years is increasing.
+
+```{r}
+ARG_richness_sample_year <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, year) %>%
+  summarise(N_ARG = unique(observed_arg)) 
+
+PLOT_ARG_richness_sample_year <- ARG_richness_sample_year %>%
+  ggplot(aes(x = factor(year), y = N_ARG, group = year)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_colour_viridis(discrete = T) +
+  geom_boxplot(outliers = FALSE) +
+  geom_jitter(fill = "#440154FF", width = 0.2, shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Year", title = "", colour = "") +
+  theme_mg()
+
+PLOT_ARG_richness_sample_year
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_sample_year.png"), PLOT_ARG_richness_sample_year, dpi = 600) 
+```
+
+### Richness per batch
+
+```{r}
+ARG_richness_sample_batch <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, batch) %>%
+  summarise(N_ARG = unique(observed_arg)) 
+
+PLOT_ARG_richness_sample_batch <- ARG_richness_sample_batch %>%
+  ggplot(aes(x = factor(batch), y = N_ARG, group = batch)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_colour_viridis(discrete = T) +
+  geom_boxplot(outliers = FALSE) +
+  geom_jitter(fill = "#440154FF", width = 0.2, shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "", title = "", colour = "") +
+  theme_mg()
+
+PLOT_ARG_richness_sample_batch
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_sample_batch.png"), PLOT_ARG_richness_sample_batch, dpi = 600) 
+```
+
+### Richness per locality
+
+```{r}
+#length(levels(factor(data_ARG$loc)))
+#237 unique location
+
+ARG_richness_sample_loc <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, loc) %>%
+  summarise(N_ARG = unique(observed_arg)) 
+
+PLOT_ARG_richness_sample_loc <- ARG_richness_sample_loc %>%
+  ggplot(aes(x = loc, y = N_ARG, group = loc)) +
+  #scale_x_continuous(breaks = seq(48,56,1)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_colour_viridis(discrete = T) +
+  geom_jitter(fill = "#440154FF", width = 0.2, shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Location", title = "", colour = "") +
+  theme_mg() +
+  theme(axis.text.x = element_blank())
+
+PLOT_ARG_richness_sample_loc
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_sample_loc.png"), PLOT_ARG_richness_sample_loc, dpi = 600) 
+```
+
+### Richness per latitude
+
+```{r}
+#length(levels(factor(data_ARG$lat)))
+#230 unique latitude
+
+ARG_richness_sample_lat <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, lat) %>%
+  summarise(N_ARG = unique(observed_arg)) 
+
+PLOT_ARG_richness_sample_lat <- ARG_richness_sample_lat %>%
+  ggplot(aes(x = lat, y = N_ARG, group = lat)) +
+  scale_x_continuous(breaks = seq(48,56,1)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_colour_viridis(discrete = T) +
+  geom_jitter(fill = "#440154FF", width = 0.2, shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Latitude", title = "", colour = "") +
+  theme_mg()
+
+PLOT_ARG_richness_sample_lat
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_sample_lat.png"), PLOT_ARG_richness_sample_lat, dpi = 600) 
+```
+
+## AMR gene families
+
+### Relative abundance of ARGs
+
+```{r, fig.height = 6}
+AMRfam_RelAbd_MEAN <- data_ARG %>%
+  group_by(mouseID) %>%
+  mutate(Total_abd = sum(Abundance)) %>%
+  group_by(mouseID, AMR_gene_family) %>%
+  summarise(AMR_abd = sum(Abundance),
+            Rel_abd = AMR_abd/Total_abd) %>%
+  distinct() %>%
+  group_by(AMR_gene_family) %>%
+  summarise(mean_Rel_abd = mean(Rel_abd, na.rm=T)) %>%
+  mutate(AMRfam_lab = ifelse(mean_Rel_abd < 0.005, NA, AMR_gene_family))
+
+AMRfam_RelAbd <- data_ARG %>%
+  group_by(mouseID) %>%
+  mutate(Total_abd = sum(Abundance)) %>%
+  left_join(AMRfam_RelAbd_MEAN) %>%
+  group_by(mouseID, AMRfam_lab) %>%
+  summarise(AMR_abd = sum(Abundance),
+            Rel_abd = AMR_abd/Total_abd) %>%
+  distinct()
+
+#levels(factor(AMRfam_RelAbd$AMRfam_lab))
+
+# Relative abundance by ARG mechanism
+PLOT_ARG_RelAbd_AMRfam_Sample <- ggplot(AMRfam_RelAbd, aes(x = mouseID, y = Rel_abd, fill = AMRfam_lab)) +
+  geom_bar(stat = "identity", position = "stack", colour = NA) +  # Stacked bar plot by ARG category
+  labs(title = "", x = "", y = "Abundance", fill = "") +
+  scale_y_continuous(labels = scales::percent) +  # Show y-axis as percentages
+  scale_fill_viridis(discrete = T, na.value = "grey", labels =c("16SrRNA-res to aminoglycoside antibiotics",
+                                                                "16SrRNA-res to peptide antibiotics",
+                                                                "16SrRNA-res to tetracycline derivatives",
+                                                                "23SrRNA-res to linezolid antibiotics",
+                                                                "23SrRNA-res to macrolide antibiotics",
+                                                                "23SrRNA-res to streptogramins antibiotics",
+                                                                "elfamycin resistant",
+                                                                "MFS anibiotic efflux pump",
+                                                                "RND antibiotic efflux pump",
+                                                                "tetracycline-res ribosomal protection protein",
+                                                                "Other")) +
+  guides(fill=guide_legend(ncol=2)) +
+  theme_mg() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom") 
+
+PLOT_ARG_RelAbd_AMRfam_Sample
+
+#ggsave(paste0(output_wd,"/plots/ARG_RelAbd_AMRfam_Sample.png"), PLOT_ARG_RelAbd_AMRfam_Sample, dpi = 600, width = 32, height = 16, units = "cm") 
+```
+
+### ARGs Richness per AMR gene family
+
+```{r}
+data_ARG %>% 
+  group_by(AMR_gene_family) %>%
+  summarise(N_ARG = length(unique(OTU))) %>%
+  arrange(desc(N_ARG)) %>%
+  filter(N_ARG > 1) %>%
+  dplyr::select("AMR gene family" = AMR_gene_family, 
+                "ARG richness" = N_ARG) %>%
+  flextable() %>%  
+  theme_zebra() %>% 
+  autofit() %>%   set_table_properties(layout = "autofit")
+```
+
+There are 32 other AMR gene families but that are only represented by 1 ARG.
+
+
+```{r}
+Richness_AMRfam <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, AMR_gene_family) %>%
+  summarise(N_ARG = sum(Presence)) 
+
+# PLOT_Richness_AMRfam <- Richness_AMRfam %>%
+#   ggplot(aes(x = factor(AMR_gene_family), y = N_ARG, fill = AMR_gene_family)) +
+#   scale_y_continuous(breaks = seq(0,100,10)) +
+#   scale_fill_viridis(discrete = T) +
+#   geom_jitter(, width = 0.3, shape = 21, size = 0.5, alpha = 0.5) +
+#   geom_boxplot(outliers = FALSE, colour = "black", fill = NA) +
+#   labs(y = "ARG Richness", x = "AMR gene family", title = "", fill = "AMR gene family:") +
+#   guides(fill = F) +
+#   theme_mg() +
+#   theme(axis.text.x = element_blank()) 
+# 
+# PLOT_Richness_AMRfam
+#
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_AMRfam.png"), PLOT_Richness_AMRfam, dpi = 600, width = 20, height = 12, units = "cm") 
+```
+
+## Variants
+
+### Relative abundance of ARGs
+
+```{r, fig.height = 7}
+Variant_RelAbd_MEAN <- data_ARG %>%
+  group_by(mouseID) %>%
+  mutate(Total_abd = sum(Abundance)) %>%
+  group_by(mouseID, Variant) %>%
+  summarise(Mech_abd = sum(Abundance),
+            Rel_abd = Mech_abd/Total_abd) %>%
+  distinct() %>%
+  group_by(Variant) %>%
+  summarise(mean_Rel_abd = mean(Rel_abd, na.rm=T)) %>%
+  mutate(Variant_lab = ifelse(mean_Rel_abd < 0.005, NA, Variant))
+
+Variant_RelAbd <- data_ARG %>%
+  group_by(mouseID) %>%
+  mutate(Total_abd = sum(Abundance)) %>%
+  left_join(Variant_RelAbd_MEAN) %>%
+  group_by(mouseID, Variant_lab) %>%
+  summarise(Mech_abd = sum(Abundance),
+            Rel_abd = Mech_abd/Total_abd) %>%
+  distinct()
+
+#levels(factor(Variant_RelAbd$Variant_lab))
+
+# Relative abundance by ARG mechanism
+PLOT_ARG_RelAbd_Variant_Sample <- ggplot(Variant_RelAbd, aes(x = mouseID, y = Rel_abd, fill = Variant_lab)) +
+  geom_bar(stat = "identity", position = "stack", colour = NA) +  # Stacked bar plot by ARG category
+  labs(title = "", x = "Sample", y = "Abundance", fill = "") +
+  scale_y_continuous(labels = scales::percent) +  # Show y-axis as percentages
+  scale_fill_viridis(discrete = T, na.value = "grey",labels =c("Bacteroides fragilis","Brachyspira hyodysenteriae","Butyrivibrio fibrisolvens","Campylobacter jejuni","Chlamydia psittaci","Chlamydomonas reinhardtii","Clostridioides difficile", "Cutibacterium acnes","Escherichia coli","Helicobacter pylori","Mycobacterium","Mycobacterium tuberculosis", "Mycobacteroides abscessus","Mycolicibacterium smegmatis", "Mycoplasma fermentans","Neisseria gonorrhoeae","Neisseria meningitidis","Pasteurella multocida", "Salmonella enterica","Staphylococcus aureus", "Streptococcus pneumoniae", "uncultured bacterium","Other")) +
+  guides(fill=guide_legend(ncol=2)) +
+  theme_mg() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom") 
+
+PLOT_ARG_RelAbd_Variant_Sample
+
+#ggsave(paste0(output_wd,"/plots/ARG_RelAbd_Variant_Sample.png"), PLOT_ARG_RelAbd_Variant_Sample, dpi = 600, width = 32, height = 16, units = "cm") 
+```
+
+### ARGs Richness per variant
+
+```{r}
+data_ARG %>% 
+  group_by(Variant) %>%
+  summarise(N_ARG = length(unique(OTU))) %>%
+  arrange(desc(N_ARG)) %>%
+  filter(N_ARG > 1) %>%
+  dplyr::select("Variant" = Variant, 
+                "ARG richness" = N_ARG) %>%
+  flextable() %>%  
+  theme_zebra() %>% 
+  autofit() %>%   set_table_properties(layout = "autofit")
+```
+
+There are 22 other variants but that are only represented by 1 ARG. 
+
+```{r}
+Richness_Variant <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, Variant) %>%
+  summarise(N_ARG = sum(Presence)) 
+
+# PLOT_Richness_Variant <- Richness_Variant %>%
+#   ggplot(aes(x = factor(Variant), y = N_ARG, fill = Variant)) +
+#   scale_y_continuous(breaks = seq(0,100,10)) +
+#   scale_fill_viridis(discrete = T) +
+#   geom_jitter(, width = 0.3, shape = 21, size = 1, alpha = 0.5) +
+#   geom_boxplot(outliers = FALSE, colour = "black", fill = NA, linewidth = 1) +
+#   labs(y = "ARG Richness", x = "Variant", title = "", fill = "") +
+#   theme_mg() +
+#   theme(axis.text.x = element_blank(),
+#         legend.position = "bottom") 
+# 
+# PLOT_Richness_Variant
+#
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_Variant.png"), PLOT_Richness_Variant, dpi = 600, width = 20, height = 12, units = "cm") 
+```
+
+ ## Localization
+ 
+```{r}
+
+unique(data_ARG$localization)
+length(unique(data_ARG$OTU))
+
+unique(arg_trait$localization)
+length(unique(arg_trait$ARO))
+
+
+data_ARG %>% 
+  group_by(localization) %>%
+  summarise(N_ARG = length(unique(OTU))) %>%
+  arrange(desc(N_ARG)) %>%
+  dplyr::select("Loc" = localization, 
+                "ARG richness" = N_ARG) %>%
+  flextable() %>%  
+  theme_zebra() %>% 
+  autofit() %>%   set_table_properties(layout = "autofit")
+```
+
+
+```{r}
+Richness_loc <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, localization) %>%
+  summarise(N_ARG = sum(Presence)) 
+
+PLOT_Richness_loc <- Richness_loc %>%
+  ggplot(aes(x = factor(localization), y = N_ARG, fill = localization)) +
+  scale_y_continuous(breaks = seq(0,150,25)) +
+  scale_fill_viridis_d() +
+  geom_jitter(, width = 0.3, shape = 21, size = 2, alpha = 0.5) +
+  geom_boxplot(outliers = FALSE, colour = "black", fill = NA) +
+  labs(y = "ARG Richness", x = "localization", title = "", fill = "") +
+  theme_mg() +
+  theme(legend.position = "none") 
+
+PLOT_Richness_loc
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_loc.png"), PLOT_Richness_loc, dpi = 600, width = 20, height = 12, units = "cm") 
+```
+
+## Drug_class
+ 
+```{r}
+
+data_ARG %>% 
+  mutate(drug_class_grp = case_when(
+    drug_class %in% c("beta-lactam", "cephalosporin", "carbapenem") ~ "Beta-lactams",
+    drug_class %in% c("macrolide", "lincosamide", "streptogramin", "elfamycin") ~ "MLS",
+    drug_class %in% c("fluoroquinolone", "rifamycin", "phenicol") ~ "Aromatics",
+    drug_class %in% c("pleuromutilin", "fusidane") ~ "Terpenoids",
+    drug_class %in% c("aminoglycoside") ~ "Aminoglycosides",
+    drug_class %in% c("sulfonamide") ~ "Sulfonamides",
+    drug_class %in% c("glycopeptide", "peptide") ~ "Peptides",
+    drug_class %in% c("tetracycline") ~ "Tetracyclines",
+    drug_class %in% c("diaminopyrimidine","phosphonic_acid", "aminocoumarin",
+                      "nitroimidazole", "nucleoside", "zoliflodacin","mupirocin") ~ "Other",
+    drug_class == "multidrug" ~ "Multidrug",
+    TRUE ~ "Unclassified"  # Catch any unexpected drug_class
+  )) %>%
+  group_by(drug_class_grp) %>%
+  summarise(N_ARG = length(unique(OTU))) %>%
+  arrange(desc(N_ARG)) %>%
+  dplyr::select("drug class" = drug_class_grp, 
+                "ARG richness" = N_ARG) %>%
+  flextable() %>%  
+  theme_zebra() %>% 
+  autofit() %>%   set_table_properties(layout = "autofit")
+```
+
+
+```{r}
+Richness_drug <- data_ARG %>%
+  mutate(drug_class_grp = case_when(
+    drug_class %in% c("beta-lactam", "cephalosporin", "carbapenem") ~ "Beta-lactams",
+    drug_class %in% c("macrolide", "lincosamide", "streptogramin", "elfamycin") ~ "MLS",
+    drug_class %in% c("fluoroquinolone", "rifamycin", "phenicol") ~ "Aromatics",
+    drug_class %in% c("pleuromutilin", "fusidane") ~ "Terpenoids",
+    drug_class %in% c("aminoglycoside") ~ "Aminoglycosides",
+    drug_class %in% c("sulfonamide") ~ "Sulfonamides",
+    drug_class %in% c("glycopeptide", "peptide") ~ "Peptides",
+    drug_class %in% c("tetracycline") ~ "Tetracyclines",
+    drug_class %in% c("diaminopyrimidine","phosphonic_acid", "aminocoumarin",
+                      "nitroimidazole", "nucleoside", "zoliflodacin","mupirocin") ~ "Other",
+    drug_class == "multidrug" ~ "Multidrug",
+    TRUE ~ "Unclassified"  # Catch any unexpected drug_class
+  )) %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, drug_class_grp) %>%
+  summarise(N_ARG = sum(Presence)) 
+
+PLOT_Richness_drug <- Richness_drug %>%
+  ggplot(aes(x = factor(drug_class_grp), y = N_ARG, fill = drug_class_grp)) +
+  scale_y_continuous(breaks = seq(0,150,10)) +
+  scale_fill_viridis_d() +
+  geom_jitter(, width = 0.3, shape = 21, size = 2, alpha = 0.5) +
+  geom_boxplot(outliers = FALSE, colour = "black", fill = NA) +
+  labs(y = "ARG Richness", x = "drug_class_grp", title = "", fill = "") +
+  theme_mg() +
+  theme(legend.position = "none") 
+
+PLOT_Richness_drug
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_loc.png"), PLOT_Richness_loc, dpi = 600, width = 20, height = 12, units = "cm") 
+```
+
+
+
+## Resistance mechanisms
+
+### Relative abundance of ARGs
+
+```{r}
+ResMech_RelAbd <- data_ARG %>%
+  group_by(mouseID) %>%
+  mutate(Total_abd = sum(Abundance)) %>%
+  group_by(mouseID, Resistance_Mechanism) %>%
+  summarise(Mech_abd = sum(Abundance),
+            Rel_abd = Mech_abd/Total_abd) %>%
+  distinct()
+  
+# Relative abundance by ARG mechanism
+PLOT_ARG_RelAbd_ResMech_Sample <- ggplot(ResMech_RelAbd, aes(x = mouseID, y = Rel_abd, fill = Resistance_Mechanism)) +
+  geom_bar(stat = "identity", position = "stack", colour = NA) +  # Stacked bar plot by ARG category
+  labs(title = "", x = "Sample", y = "Abundance", fill = "") +
+  scale_y_continuous(labels = scales::percent) +  # Show y-axis as percentages
+  scale_fill_viridis(discrete = T) +
+  guides(fill=guide_legend(ncol=2)) +
+  theme_mg() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom")  
+
+PLOT_ARG_RelAbd_ResMech_Sample
+
+#ggsave(paste0(output_wd,"/plots/ARG_RelAbd_ResMech_Sample.png"), PLOT_ARG_RelAbd_ResMech_Sample, dpi = 600, width = 32, height = 12, units = "cm") 
+```
+
+### ARGs Richness per mechanism
+
+In the data, antibiotic target alteration shows the highest ARG richness, followed by antibiotic efflux.  
+
+```{r}
+data_ARG %>% 
+  group_by(Resistance_Mechanism) %>%
+  summarise(N_ARG = length(unique(OTU))) %>%
+  arrange(desc(N_ARG)) %>%
+  dplyr::select("Resistance mechanism" = Resistance_Mechanism, 
+                "ARG richness" = N_ARG) %>%
+  flextable() %>%  
+  theme_zebra() %>% 
+  autofit() %>%   set_table_properties(layout = "autofit")
+```
+
+In samples, antibiotic target alteration shows the highest ARG richness, with values clustering between 40 and 60, and some points reaching as high as 80-90.  
+Antibiotic efflux and antibiotic inactivation mechanisms show much lower ARG richness, clustering around 0-20.  
+Other mechanisms, such as antibiotic target protection, multiple mechanisms, and reduced permeability to antibiotics, show relatively low ARG richness, generally below 10.  
+
+```{r}
+Richness_ResMech <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, Resistance_Mechanism) %>%
+  summarise(N_ARG = sum(Presence)) 
+
+PLOT_Richness_ResMech <- Richness_ResMech %>%
+  ggplot(aes(x = factor(Resistance_Mechanism), y = N_ARG, fill = Resistance_Mechanism)) +
+  scale_y_continuous(breaks = seq(0,100,10)) +
+  scale_fill_viridis_d(option = "A") +
+  geom_jitter(, width = 0.3, shape = 21, size = 2, alpha = 0.5) +
+  geom_boxplot(outliers = FALSE, colour = "black", fill = NA) +
+  guides(fill=guide_legend(ncol=2)) +
+  labs(y = "ARG Richness", x = "Resistance mechanism", title = "", fill = "") +
+  theme_mg() +
+  theme(axis.text.x = element_blank(),
+        legend.position = "bottom") 
+
+PLOT_Richness_ResMech
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_ResMech.png"), PLOT_Richness_ResMech, dpi = 600, width = 20, height = 12, units = "cm") 
+```
+
+### Fluctuation over time
+Only ARGs with an antibiotic target alteration show an increase in their richness.  
+The other ARGs show no particular trend over time.  
+
+```{r, fig.width=6}
+Richness_ResMech_year <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, year, Resistance_Mechanism) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  group_by(Resistance_Mechanism, year) %>%
+  summarise(mean_richness = mean(N_ARG),
+            se = sd(N_ARG) / sqrt(n()),  # Standard error
+            lower_CI = mean_richness - 1.96 * se,  # Lower bound of 95% CI
+            upper_CI = mean_richness + 1.96 * se)
+
+PLOT_Richness_ResMech_year <- Richness_ResMech_year %>%
+  ggplot(aes(x = factor(year), y = mean_richness, ymin = lower_CI, ymax = upper_CI,
+             fill = Resistance_Mechanism, group = Resistance_Mechanism)) +
+  scale_y_continuous(breaks = seq(0,60,5)) +
+  #scale_x_continuous(breaks = seq(2015,2022,1)) +
+  scale_fill_viridis_d(option = "A") +
+  geom_line() +
+  geom_errorbar(width = 0.2) +
+  geom_point(shape = 21, size = 2, alpha = 0.9) +
+  guides(fill=guide_legend(ncol=2)) +
+  labs(y = "ARG Richness", x = "Year",  title = "", fill = "") +
+  theme_mg() +
+  theme(legend.position = "bottom")
+
+PLOT_Richness_ResMech_year
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_ResMech_year.png"), PLOT_Richness_ResMech_year, dpi = 600, width = 20, height = 12, units = "cm") 
+```
+
+####################################################### END LAST REPORT - 2024-09-26 #######################################################
+
+####################################################### SECOND REPORT - 2024-10-** #######################################################
+
+## Map density per year
+
+```{r}
+data_aggr <- data_ARG %>%
+  dplyr::select(-c(1:3,45:50)) %>%
+  distinct()
+
+MAP_samples_density_year <- ggmap(map) +
+  scale_x_continuous(breaks = seq(9,15,1), limits = c(9,15)) +
+  scale_y_continuous(breaks = seq(48,55,1), limits = c(47.9,54.2)) +
+  stat_density2d(data = data_aggr, aes(fill = ..level..), h = 0.5, n = 300, alpha = 0.5, geom = "polygon") + 
+  geom_point(data = data_aggr, aes(x = lon, y = lat), shape = 21, size = 1, alpha = 0.2) + 
+  scale_fill_viridis_c() +
+  facet_wrap(~ year) +
+  coord_equal() + 
+  labs(y = "Latitude", x = "Longitude", title = "") +
+  theme_mg_facets()
+
+MAP_samples_density_year
+```
+
+## Map samples per year with ARG richness
+
+```{r}
+data_aggr <- data_ARG %>%
+  dplyr::select(-c(1:3,45:50)) %>%
+  distinct() %>%
+  mutate(ARG_cat = ifelse(observed_arg >= 100, "high", "low"))
+
+MAP_samples_year_richness <- ggmap(map) +
+  scale_x_continuous(breaks = seq(9,15,1), limits = c(9,15)) +
+  scale_y_continuous(breaks = seq(48,55,1), limits = c(47.9,54.2)) +
+  #stat_density2d(data = data_aggr, aes(fill = ..level..), h = 0.5, n = 300, alpha = 0.5, geom = "polygon") + 
+  geom_point(data = data_aggr, aes(x = lon, y = lat, fill = ARG_cat), shape = 21, size = 2, alpha = 0.8) + 
+  scale_fill_viridis_d() +
+  facet_wrap(~ year) +
+  coord_equal() + 
+  labs(y = "Latitude", x = "Longitude", fill = "ARG richness") +
+  theme_mg_facets()
+
+MAP_samples_year_richness
+```
+
+```{r}
+N_sample_year <- data_ARG %>%
+  dplyr::select(-c(1:3,45:50)) %>%
+  distinct() %>%
+  mutate(ARG_cat = ifelse(observed_arg >= 100, "high", "low")) %>%
+  group_by(year, ARG_cat) %>%
+  summarise(N_sample = length(mouseID))
+
+PLOT_samples_N_year <- N_sample_year %>%
+  ggplot(aes(x = factor(year), y = N_sample, fill = ARG_cat)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  #scale_x_continuous(breaks = seq()) +
+  scale_fill_viridis_d() +
+  geom_col(alpha = 0.5) +
+  labs(y = "Number of samples", x = "Year", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_samples_N_year
+```
+
+
+### ARG presence in Sample 
+
+```{r}
+Presence_OTU_sample_AMR <- data_ARG %>%
+  group_by(OTU, AMR_gene_family) %>%
+  mutate(N_sample = sum(Abundance != 0)) %>%
+  dplyr::select(OTU, AMR_gene_family, N_sample) %>%
+  group_by(AMR_gene_family) %>%
+  summarise(avg_sample_n = round(mean(N_sample),0)) %>%
+  arrange(desc(avg_sample_n)) %>%
+  rename("AMR gene family" = AMR_gene_family, 
+         "Represented in # samples" = avg_sample_n) %>%
+  flextable() %>%  
+  theme_zebra() %>% 
+  autofit()
+
+Presence_OTU_sample_AMR
+```
+
+### Variant
+```{r}
+Presence_OTU_sample_Var <- data_ARG %>%
+  group_by(OTU, Variant) %>%
+  mutate(N_sample = sum(Abundance != 0)) %>%
+  dplyr::select(OTU, Variant, N_sample) %>%
+  group_by(Variant) %>%
+  summarise(avg_sample_n = round(mean(N_sample),0)) %>%
+  arrange(desc(avg_sample_n)) %>%
+  rename("Variant" = Variant, 
+         "Represented in # samples" = avg_sample_n) %>%
+  flextable() %>%  
+  theme_zebra() %>% 
+  autofit()
+
+Presence_OTU_sample_Var
+```
+
+### Resistance mechanism
+```{r}
+Presence_OTU_sample_ResMech <- data_ARG %>%
+  group_by(OTU, Resistance_Mechanism) %>%
+  mutate(N_sample = sum(Abundance != 0)) %>%
+  dplyr::select(OTU, Resistance_Mechanism, N_sample) %>%
+  group_by(Resistance_Mechanism) %>%
+  summarise(avg_sample_n = round(mean(N_sample),0)) %>%
+  arrange(desc(avg_sample_n)) %>%
+  rename("Resistance mechanism" = Resistance_Mechanism, 
+         "Represented in # samples" = avg_sample_n) %>%
+  flextable() %>%  
+  theme_zebra() %>% 
+  autofit()
+
+Presence_OTU_sample_ResMech
+```
+
+
+## Abundance of ARG
+
+```{r}
+Abundance_richness <- data_ARG %>%
+  dplyr::select(mouseID, OTU, AMR_gene_family, Variant, Resistance_Mechanism, Abundance, observed_arg, year) %>%
+  distinct() %>%
+  mutate(ARG_cat = ifelse(observed_arg >= 100, "high", "low")) %>%
+  group_by(observed_arg, ARG_cat) %>%
+  summarise(mean_abd = mean(Abundance))
+
+PLOT_samples_abd_richness <- Abundance_richness %>%
+  ggplot(aes(x = observed_arg, y = mean_abd, fill = ARG_cat)) +
+  scale_y_continuous(breaks = seq(0,4500,500)) +
+  scale_x_continuous(breaks = seq(0,200,25)) +
+  scale_fill_viridis_d() +
+  geom_col() +
+  labs(y = "Average abundance", x = "Richness", title = "", fill = "") +
+  theme_mg()
+
+PLOT_samples_abd_richness 
+```
+
+```{r}
+Abundance <- data_ARG %>%
+  dplyr::select(mouseID, OTU, AMR_gene_family, Variant, Resistance_Mechanism, Abundance, observed_arg, year) %>%
+  distinct() %>%
+  group_by(mouseID) %>%
+  summarise(mean_abd = mean(Abundance))
+
+PLOT_samples_abd <- Abundance %>%
+  ggplot(aes(x = mouseID, y = mean_abd)) +
+  scale_y_continuous(breaks = seq(0,4500,500)) +
+  #scale_x_continuous(breaks = seq()) +
+  scale_fill_viridis_d() +
+  geom_col() +
+  labs(y = "Average abundance", x = "Sample", title = "", fill = "") +
+  theme_mg() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+PLOT_samples_abd
+```
+
+
+## Richness
+
+```{r}
+Richness <- data_ARG %>%
+  dplyr::select(mouseID, observed_arg) %>%
+  distinct() 
+
+avg_richness <- mean(Richness$observed_arg)
+
+PLOT_samples_richness <- Richness %>%
+  ggplot(aes(x = mouseID, y = observed_arg)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  #scale_x_continuous(breaks = seq()) +
+  scale_fill_viridis_d() +
+  geom_col() +
+  geom_hline(yintercept = avg_richness, colour = "#440154FF", linetype = "dashed", linewidth = 1) +
+  labs(y = "Average abundance", x = "Sample", title = "", fill = "") +
+  theme_mg() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+PLOT_samples_richness 
+```
+
+
+### Prevalence of ARGs in sample
+
+```{r}
+Prevalence_ARG <- data_ARG %>%
+  dplyr::filter(Abundance > 0) %>%
+  dplyr::select(mouseID, OTU) %>%
+  group_by(OTU) %>%
+  summarise(n = length(unique(mouseID)),
+            prev = n/859)
+
+
+Mean_ABD_ARG <- data_ARG %>%
+  group_by(OTU) %>%
+  summarise(mean_abd = mean(Abundance),
+            var_abd = var(Abundance)) %>%
+  left_join(Prevalence_ARG)
+
+
+ggplot(Mean_ABD_ARG, aes(x = prev, y = mean_abd)) +
+  geom_point()
+
+
+
+```
+
+
+
+
+
+
+
+
+
+## Sankey diagrams
+
+Removing ARG that particular, very rare categories.
+
+```{r}
+data_OTU <- data_ARG %>%
+  dplyr::select(OTU, AMR_gene_family, Variant, Resistance_Mechanism) %>%
+  distinct() %>%
+  group_by(AMR_gene_family, Variant, Resistance_Mechanism) %>%
+  summarize(N = length(unique(OTU))) %>%
+  rename("AMR gene family" = AMR_gene_family, "Resistance mechanism" = Resistance_Mechanism) %>%
+  filter(N > 1)
+
+data_sankey <- data_OTU %>%
+  ungroup() %>%
+  make_long("AMR gene family", Variant, "Resistance mechanism")
+  
+PLOT_Sankey <- data_sankey %>%
+  ggplot(aes(x = x, 
+             next_x = next_x, 
+             node = node, 
+             next_node = next_node, 
+             fill = node,
+             label = node)) +
+  geom_sankey(flow.alpha = 0.5) +
+  geom_sankey_label(size = 4, fill = "white", family = "Poppins") +
+  scale_fill_viridis_d(alpha = 0.95) +
+  theme_mg_sankey() +
+  theme(legend.position = "none",
+        axis.title.x = element_blank())
+
+PLOT_Sankey 
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_ResMech_year.png"), PLOT_Richness_ResMech_year, dpi = 600, width = 20, height = 12, units = "cm") 
+```
+
+Removing non-abundant ARG
+
+```{r}
+data_OTU <- data_ARG %>%
+  group_by(OTU, AMR_gene_family, Variant, Resistance_Mechanism) %>%
+  summarise(mean_abd = round(mean(Abundance),2)) %>%
+  filter(mean_abd > 500) %>%
+  group_by(AMR_gene_family, Variant, Resistance_Mechanism) %>%
+  rename("AMR gene family" = AMR_gene_family, "Resistance mechanism" = Resistance_Mechanism) 
+
+data_sankey <- data_OTU %>%
+  ungroup() %>%
+  make_long("AMR gene family", Variant, "Resistance mechanism")
+  
+PLOT_Sankey <- data_sankey %>%
+  ggplot(aes(x = x, 
+             next_x = next_x, 
+             node = node, 
+             next_node = next_node, 
+             fill = node,
+             label = node)) +
+  geom_sankey(flow.alpha = 0.5) +
+  geom_sankey_label(size = 4, fill = "white", family = "Poppins") +
+  scale_fill_viridis_d(alpha = 0.95) +
+  theme_mg_sankey() +
+  theme(legend.position = "none",
+        axis.title.x = element_blank())
+
+PLOT_Sankey 
+
+#ggsave(paste0(output_wd,"/plots/ARG_Richness_ResMech_year.png"), PLOT_Richness_ResMech_year, dpi = 600, width = 20, height = 12, units = "cm") 
+```
+
+
+## ARG richness per env. cov.
+
+### Sex
+
+```{r}
+ARG_richness_sex <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, sex) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low")) %>%
+  filter(sex != "")
+
+PLOT_ARG_richness_sex <- ARG_richness_sex %>%
+  ggplot(aes(x = sex, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_fill_viridis_d() +
+  geom_jitter(width = 0.2, shape = 21, size = 2, alpha = 0.5) +
+  geom_boxplot(outliers = F, alpha =  0.5) +
+  labs(y = "ARG Richness", x = "sex", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_sex
+```
+
+### BMI
+
+```{r}
+ARG_richness_BMI <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, BMI) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low")) 
+
+PLOT_ARG_richness_bmi <- ARG_richness_BMI %>%
+  ggplot(aes(x = BMI, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(-10,10,2)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "BMI", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_bmi
+```
+
+
+### Hybridization Index
+
+```{r}
+ARG_richness_HI <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, HI) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low")) 
+
+PLOT_ARG_richness_HI <- ARG_richness_HI %>%
+  ggplot(aes(x = HI, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(0,1,0.2)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "HI", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_HI
+
+```
+
+### N trapped
+
+```{r}
+ARG_richness_Ntrapped <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, Ntrapped) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_Ntrapped <- ARG_richness_Ntrapped %>%
+  ggplot(aes(x = Ntrapped, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(0,20,5)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Ntrapped", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_Ntrapped
+
+```
+
+
+### Imperviousness
+
+```{r}
+ARG_richness_imperv <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, imperv) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_imperv <- ARG_richness_imperv %>%
+  ggplot(aes(x = imperv, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(0,100,20)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Imperviousness", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_imperv
+```
+
+
+### Tree cover
+
+```{r}
+ARG_richness_tcd <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, tcd) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_tcd <- ARG_richness_tcd %>%
+  ggplot(aes(x = tcd, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(0,100,20)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Tree cover density", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_tcd
+```
+
+
+### SWF
+
+```{r}
+ARG_richness_swf <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, swf) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_swf <- ARG_richness_swf %>%
+  ggplot(aes(x = swf, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(0,100,20)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "SWF", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_swf
+```
+
+
+### Distance to road
+
+```{r}
+ARG_richness_dist_road <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, dist_road) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_dist_road <- ARG_richness_dist_road %>%
+  ggplot(aes(x = dist_road, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(0,600,50)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Distance to road", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_dist_road
+```
+
+
+### Distance to path
+
+```{r}
+ARG_richness_dist_path <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, dist_path) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_dist_path <- ARG_richness_dist_path %>%
+  ggplot(aes(x = dist_path, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(0,1000,100)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Distance to path", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_dist_path
+```
+
+
+### Cattle density
+
+```{r}
+ARG_richness_cat_dens <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, cat_dens) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_cat_dens <- ARG_richness_cat_dens %>%
+  ggplot(aes(x = cat_dens, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(0,1,0.2)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Cattle density", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_cat_dens
+```
+
+
+### Pig density
+
+```{r}
+ARG_richness_pig_dens <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, pig_dens) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_pig_dens <- ARG_richness_pig_dens %>%
+  ggplot(aes(x = pig_dens, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(0,1,0.1)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Pig density", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_pig_dens
+```
+
+
+### Poultry density
+
+```{r}
+ARG_richness_pou_dens <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, pou_dens) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_pou_dens <- ARG_richness_pou_dens %>%
+  ggplot(aes(x = pou_dens, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  scale_x_continuous(breaks = seq(0,350,50)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "Poultry density", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_pou_dens
+```
+
+
+### CLC
+
+```{r}
+ARG_richness_clc <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  group_by(mouseID, clc_fct) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_clc <- ARG_richness_clc %>%
+  ggplot(aes(x = factor(clc_fct), y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  #scale_x_continuous(breaks = seq(0,600,50)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "clc", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_clc
+```
+
+
+### Precipitation
+
+```{r}
+ARG_richness_prec <- data_ARG %>%
+  mutate(Presence = ifelse(Abundance == 0, 0, 1)) %>%
+  mutate(precipitation_aug = case_when(
+    year == 2015 ~ prec_aug_2015,
+    year == 2016 ~ prec_aug_2016,
+    year == 2017 ~ prec_aug_2017,
+    year == 2018 ~ prec_aug_2018,
+    year == 2019 ~ prec_aug_2019,
+    year == 2021 ~ prec_aug_2021,
+    year == 2022 ~ prec_aug_2022,
+    TRUE ~NA)) %>%
+  group_by(mouseID, precipitation_aug) %>%
+  summarise(N_ARG = sum(Presence)) %>%
+  mutate(ARG_lvl = ifelse(N_ARG >= 100, "high", "low"))
+
+PLOT_ARG_richness_prec <- ARG_richness_prec %>%
+  ggplot(aes(x = precipitation_aug, y = N_ARG, fill = ARG_lvl)) +
+  scale_y_continuous(breaks = seq(0,200,25)) +
+  #scale_x_continuous(breaks = seq(0,600,50)) +
+  scale_fill_viridis_d() +
+  geom_point(shape = 21, size = 2, alpha = 0.5) +
+  labs(y = "ARG Richness", x = "precipitation", title = "", fill = "ARG richness") +
+  theme_mg()
+
+PLOT_ARG_richness_prec
+```
+
+
+## PCA
+
+```{r}
+# Step 1: Install and load the vegan package
+install.packages("vegan")  # Run this line if you haven't installed vegan
+library(vegan)
+
+# Step 2: Load your data
+# For this example, we'll use the built-in iris dataset. You can replace this with your own data.
+data(iris)
+
+# Step 3: Prepare the data
+# Select only the numeric columns (removing the species column)
+iris_data <- iris[, 1:4]
+
+# Step 4: Standardize the data (optional but recommended)
+iris_data_scaled <- scale(iris_data)
+
+# Step 5: Run PCA
+pca_result <- rda(iris_data_scaled)
+
+# Step 6: Summary of PCA
+summary(pca_result)
+
+# Step 7: Visualize the results
+# Biplot to visualize the PCA results
+biplot(pca_result, scaling = 1)
+
+# Optional: Scree plot to see the variance explained by each component
+screeplot(pca_result, main = "Scree Plot", bstick = TRUE)
+
+
+```
+
+
+
+
+
+
+
+
