@@ -1,0 +1,41 @@
+Gen_groups,Description,Resistance_Mechanism,Drug_class
+CblA,CblA beta-lactamase,antibiotic inactivation,cephalosporin
+CepA,CepA beta-lactamase,antibiotic inactivation,cephalosporin
+CfxA,CfxA beta-lactamase,antibiotic inactivation,cephamycin
+CTX-M,CTX-M beta-lactamase,antibiotic inactivation,cephalosporin
+KPC,KPC beta-lactamase,antibiotic inactivation,"monobactam,carbapenem,cephalosporin,penam"
+SHV,SHV beta-lactamase,antibiotic inactivation,"carbapenem,cephalosporin,penam"
+TEM,TEM beta-lactamase,antibiotic inactivation,"penam,monobactam,cephalosporin,penem"
+CfiA,CfiA beta-lactamase,antibiotic inactivation,carbapenem
+IMP,IMP beta-lactamase,antibiotic inactivation,"carbapenem,cephalosporin,cephamycin,penam"
+NDM,NDM beta-lactamase,antibiotic inactivation,"carbapenem,cephalosporin,cephamycin,penam"
+VIM,VIM beta-lactamase,antibiotic inactivation,"carbapenem,cephalosporin,cephamycin,penam"
+ACT,ACT beta-lactamase,antibiotic inactivation,"carbapenem,cephalosporin,cephamycin,penam"
+ampC,ampC-type beta-lactamase,antibiotic inactivation,"cephalosporin,penam"
+CMY,CMY beta-lactamase,antibiotic inactivation,cephamycin
+OXA,OXA beta-lactamase,antibiotic inactivation,"carbapenem, cephalosporin, penam"
+AAC(3),AAC(3),antibiotic inactivation,aminoglycoside
+AAC(6'),AAC(6'),antibiotic inactivation,aminoglycoside
+ANT(3''),ANT(3''),antibiotic inactivation,aminoglycoside
+ANT(4'),ANT(4'),antibiotic inactivation,aminoglycoside
+ANT(6),ANT(6),antibiotic inactivation,aminoglycoside
+APH(2''),APH(2''),antibiotic inactivation,aminoglycoside
+APH(3'),APH(3'),antibiotic inactivation,aminoglycoside
+APH(3''),APH(3''),antibiotic inactivation,aminoglycoside
+APH(6),APH(6),antibiotic inactivation,aminoglycoside
+vanA,vanA,antibiotic target alteration,glycopeptide
+vanB,vanB,antibiotic target alteration,glycopeptide
+qnr,quinolone resistance protein (qnr),antibiotic target protection,fluoroquinolone
+MCR,MCR phosphoethanolamine transferase,antibiotic target alteration,peptide
+pmr,pmr phosphoethanolamine transferase,antibiotic target alteration,peptide
+Fos,fosfomycin thiol transferase,antibiotic inactivation,phosphonic acid
+cat,chloramphenicol acetyltransferase (CAT),antibiotic inactivation,phenicol
+tet,tetracycline-resistant ribosomal protection protein,antibiotic target protection,tetracycline
+tet,tetracycline inactivation enzyme,antibiotic inactivation,tetracycline
+Cfr,Cfr 23S ribosomal RNA methyltransferase,antibiotic target alteration,"oxazolidinone,streptogramin,phenicol,lincosamide"
+Erm,Erm 23S ribosomal RNA methyltransferase,antibiotic target alteration,"macrolide, lincosamide, streptogramin"
+lnu,lincosamide nucleotidyltransferase (LNU),antibiotic inactivation,lincosamide
+Ere,macrolide esterase,antibiotic inactivation,macrolide
+mph,macrolide phosphotransferase (MPH),antibiotic inactivation,macrolide
+arr,rifampin ADP-ribosyltransferase (Arr),antibiotic inactivation,rifamycin
+sul,sulfonamide resistant sul,antibiotic target replacement,sulfonamide
