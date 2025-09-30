@@ -88,7 +88,7 @@ mice_data <- mice_data %>%
 
 ```{r}
 # traits data
-arg_trait <- read.csv("./data/processed/arg_trait.csv")
+arg_trait <- read.csv("./data/raw/arg_mobility.csv")
 head(arg_trait)
 
 ```
@@ -1029,6 +1029,9 @@ PLOT_Gamma_all
 
 ggsave(PLOT_Gamma_all , filename = here("figures", paste0("Plot_jsdm_abd_traits_gammas_", date, ".png")), height = 20, width = 16, units = "cm", dpi = 600)
 
+# Save the plot as a SVG
+
+ggsave(PLOT_Gamma_all , filename = here("figures", paste0("Plot_jsdm_abd_traits_gammas_", date, ".svg")), height = 20, width = 16, units = "cm", dpi = 600)
 
 ```
 
@@ -1346,7 +1349,9 @@ PLOT_Avg_VarPart_tot_mob
 
 ggsave(PLOT_Avg_VarPart_tot_mob, filename = here("figures", paste0("Plot_jsdm_abd_varpart_tot_mob_", date, ".png")), height = 10, width = 16, units = "cm", dpi = 600)
 
+# Save the plot as a SVG
 
+ggsave(PLOT_Avg_VarPart_tot_mob, filename = here("figures", paste0("Plot_jsdm_abd_varpart_tot_mob_", date, ".svg")), height = 10, width = 16, units = "cm", dpi = 600)
 
 ```
 
@@ -1418,7 +1423,9 @@ Plot_VarPart_traits
 
 ggsave(Plot_VarPart_traits, filename = here("figures", paste0("Plot_jsdm_abd_traits_varpart_", date, ".png")), height = 16, width = 16, units = "cm", dpi = 600)
 
+# Save the plot as a SVG
 
+ggsave(Plot_VarPart_traits, filename = here("figures", paste0("Plot_jsdm_abd_traits_varpart_", date, ".svg")), height = 16, width = 16, units = "cm", dpi = 600)
 
 ```
 
