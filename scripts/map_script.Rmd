@@ -1,0 +1,302 @@
+---
+title: "ARGs in mice gut microbiome - MAP"
+subtitle: "Morgane Gicquel"
+date: "2025-06-12"
+output:
+  officedown::rdocx_document:
+    reference_docx: D:/PopDynCloud/Projects/mus_musculus_de_amr_gicquel_m/misc/TEMPLATE_meeting.docx
+    toc: true
+    toc_depth: 2
+    plots:
+      style: Normal
+      align: center
+      layout: autofit
+    tables:
+      style: Table
+      layout: autofit
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, 
+                      dpi = 600, out.width = 100, out.height = 100, fig.width = 6)
+```
+
+```{r prepare workspace}
+setwd("D:/PopDynCloud/Projects/mus_musculus_de_amr_gicquel_m")
+wrkdir <- getwd()
+
+source("scripts/source_packages.R")
+source("scripts/source_themes_mg.R")
+source("scripts/source_api.R")
+
+output_wd <- here("output")
+
+geoproc_wd <- here("data", "processed", "geo")
+
+
+```
+
+```{r include=FALSE}
+# mice related data
+mice_data <- read.csv(here("data", "processed", "Table_ARG_mice_envcov_100m_202411.csv"))
+head(mice_data)
+table(mice_data$year)
+
+mice_data <- mice_data %>%
+  filter(sex != "") 
+
+```
+
+```{r include=FALSE}
+# trait data
+arg_trait <- read.csv(here("data","raw", "arg_mobility.csv"))
+head(arg_trait)
+
+```
+
+```{r include=FALSE}
+# ARG bacteria data
+PS.ARG.raw_jS <- readRDS(here("data","processed", "PS.ARG.raw.filt_jS.rds"))
+PS.ARG.raw_jS <- PS.ARG.raw_jS %>%
+  subset_samples(., sex != "")
+
+sample_data(PS.ARG.raw_jS@sam_data)
+
+# Change order of taxa
+
+new_tax <- data.frame(PS.ARG.raw_jS@tax_table) %>%
+  mutate(ARO = rownames(.)) %>%
+  dplyr::select(ARO, ARG_CARD_Short, AMR_gene_family, Resistance_Mechanism, Variant)
+  
+PS.ARG.raw_jS@tax_table <- tax_table(as.matrix(new_tax))
+
+## get data at ARO level
+
+PS_ARG_aro <- tax_glom(PS.ARG.raw_jS, taxrank = "ARO")
+  
+PS_ARG_aro
+
+unique(data.frame(PS_ARG_aro@tax_table)$ARO)
+
+
+data_ARG <- psmelt(PS_ARG_aro)
+                   
+data_aggr <- data_ARG %>%
+  dplyr::select(farm_ID, Ntrapped, lon, lat) %>%
+  distinct() 
+  
+  
+
+sample_sf <- st_as_sf(data_aggr, coords = c("lon", "lat"), crs = 4326)
+
+sample_sf <- st_transform(sample_sf, crs = 3035)
+
+```
+
+
+# MAP
+
+```{r layers}
+
+# Background map
+
+map <- get_googlemap("Germany", zoom = 6, maptype = "terrain")
+#map <- get_stadiamap(bbox = c(left = 7, bottom = 47, right = 15, top = 55), zoom = 8, maptype = "stamen_toner_lite")
+
+germany_map <- get_stadiamap(bbox = c(left = 9, bottom = 48, right = 15, top = 54),
+                             zoom = 6, maptype = "stamen_terrain")
+
+# Region
+
+region <- st_read("./data/processed/geo/germany_3035.gpkg") %>%
+  rename(region_lab = GEN) %>%
+  mutate(region_lab = case_when(region_lab == "Bayern" ~ "Bavaria",
+                                .default = as.character(region_lab)))
+
+
+# Municipality
+
+munip <- st_read(here("data", "processed", "geo","livestock_germany_2020_vector_3035.gpkg")) %>%
+  rename(munip_lab = gem_name) %>%
+  dplyr::select(munip_lab)
+
+# SAMPLING AREAS
+
+# Define bounding box for NE cluster (Brandenburg/Berlin)
+bbox_ne <- st_bbox(c(xmin = 11, xmax = 14.5, ymin = 51.5, ymax = 54), crs = 4326)
+
+# Define bounding box for S cluster (Bavaria)
+bbox_s <- st_bbox(c(xmin = 11.5, xmax = 13, ymin = 48, ymax = 50), crs = 4326)
+
+# Determine maximum width and height to use for both
+max_width  <- max(bbox_ne["xmax"] - bbox_ne["xmin"], bbox_s["xmax"] - bbox_s["xmin"])
+max_height <- max(bbox_ne["ymax"] - bbox_ne["ymin"], bbox_s["ymax"] - bbox_s["ymin"])
+
+# Function to center and resize a bbox
+resize_bbox <- function(bbox, width, height) {
+  center_x <- as.numeric((bbox["xmin"] + bbox["xmax"]) / 2)
+  center_y <- as.numeric((bbox["ymin"] + bbox["ymax"]) / 2)
+  
+  new_bbox <- st_bbox(c(
+    xmin = center_x - width / 2,
+    xmax = center_x + width / 2,
+    ymin = center_y - height / 2,
+    ymax = center_y + height / 2
+  ), crs = st_crs(bbox))
+  
+  return(new_bbox)
+}
+
+# Apply resizing
+bbox_ne_resized <- resize_bbox(bbox_ne, max_width, max_height)
+bbox_s_resized  <- resize_bbox(bbox_s,  max_width, max_height)
+
+# If your sf object is in EPSG:3035, transform the bbox
+bbox_ne_3035 <- st_transform(st_as_sfc(bbox_ne_resized), crs = 3035)
+bbox_s_3035 <- st_transform(st_as_sfc(bbox_s_resized), crs = 3035)
+
+
+# MAIN GERMAN CITIES
+
+cities <- data.frame(
+  city = c(
+    "Berlin", "Hamburg", "Munich", "Cologne", "Frankfurt", "Stuttgart",
+    "Düsseldorf", "Leipzig", "Bremen", "Dresden",
+    "Hanover", "Nuremberg", "Potsdam", "Schwerin", "Mainz", "Saarbrücken", "Kiel", "Erfurt", "Magdeburg"
+  ),
+  long = c(
+    13.4050, 9.9937, 11.5820, 6.9603, 8.6821, 9.1815,
+    6.7735, 12.3731, 8.8017, 13.7373,
+    9.7320, 11.0767, 13.0645, 11.4092, 8.2473, 6.9969, 10.1228, 11.0299, 11.6276
+  ),
+  lat = c(
+    52.5200, 53.5511, 48.1351, 50.9375, 50.1109, 48.7758,
+    51.2277, 51.3397, 53.0793, 51.0504,
+    52.3759, 49.4521, 52.3906, 53.6355, 50.0000, 49.2402, 54.3233, 50.9848, 52.1205
+  )
+)
+
+cities_sf <- st_as_sf(cities, coords = c("long", "lat"), crs = 4326)
+
+cities_sf_3035 <- st_transform(cities_sf, crs = 3035)
+
+cities_sf_ne_3035 <- st_intersection(cities_sf_3035, bbox_ne_3035)
+
+cities_sf_s_3035 <- st_intersection(cities_sf_3035, bbox_s_3035)
+
+
+
+```
+
+```{r}
+
+library(ggrepel)
+library(ggspatial)
+
+MAP <- ggplot() +
+  #scale_x_continuous(breaks = seq(9,17,1), limits = c(9,17)) +
+  #scale_y_continuous(breaks = seq(48,55,1), limits = c(48,54.2)) +
+  geom_sf(data = region, aes(fill = region_lab), colour = "grey50", alpha = 0.3, linewidth = 0.1) +
+  geom_sf(data = sample_sf, size = 2, alpha = 0.5, aes(colour = Ntrapped)) +
+  geom_sf(data = cities_sf_3035, size = 1.5, shape = 18) + 
+  geom_sf(data = bbox_ne_3035, fill = "NA", colour = "sienna4", linewidth = 1) +
+  geom_sf(data = bbox_s_3035, fill = "NA", colour = "olivedrab4", linewidth = 1) +
+  geom_text_repel(data = cities_sf_3035, aes(label = city, geometry = geometry), stat = "sf_coordinates", colour = "grey10", box.padding = 0.2, size = 2.5) +
+  #geom_text_repel(data = region, aes(label = region_lab, geometry = geom), stat = "sf_coordinates", colour = "grey10", min.segment.length = 0.5) +
+  coord_sf(crs = 3035) +
+  scale_fill_viridis_d() +
+  scale_colour_viridis(option = "turbo", 
+                       breaks = c(1, 5, 10, 15, 18), # key tick marks
+                       limits = c(1, 18)) +
+  annotation_north_arrow(
+    location = "tl",       # top right corner
+    which_north = "true",  # geographic north
+    pad_x = unit(0.1, "in"),
+    pad_y = unit(0.1, "in"),
+    height = unit(0.3, "in"),
+    width = unit(0.2, "in"),
+    style = north_arrow_orienteering
+  ) +
+  guides(fill = F) +
+  labs(y = "Latitude", x = "Longitude", colour = "Number of\ncaptured mice:") +
+  theme_mg_map() +
+  theme(legend.position = "right",
+        legend.direction = "vertical")
+
+MAP
+
+
+
+MAP_NE <- ggplot() +
+  scale_x_continuous(breaks = seq(11,14,1)) +
+  #scale_y_continuous(breaks = seq(48,55,1), limits = c(48,54.2)) +
+  geom_sf(data = region, aes(fill = region_lab), colour = "grey30", alpha = 0.3, linewidth = 0.3) +
+  geom_sf(data = sample_sf, size = 2.5, alpha = 0.5, aes(colour = Ntrapped)) +
+  geom_sf(data = cities_sf_ne_3035, size = 1.5, shape = 18) +
+  geom_text_repel(data = cities_sf_ne_3035, aes(label = city, geometry = geometry), stat = "sf_coordinates", colour = "grey10", box.padding = 0.2, size = 2.5) +
+  geom_text(data = subset(region, region_lab %in% c("Brandenburg","Mecklenburg-Vorpommern")), aes(label = region_lab, geometry = geom), stat = "sf_coordinates", colour = "black", size = 3) +
+  coord_sf(crs = 3035,
+           xlim = c(4386586, 4633254),  # values in meters
+           ylim = c(3154844, 3441727)) +
+    scale_fill_viridis_d() +
+    scale_colour_viridis(option = "turbo", 
+                       breaks = c(1, 5, 10, 15, 18), # key tick marks
+                       limits = c(1, 18)) +
+  guides(fill = F, colour = F) +
+  labs(y = "Latitude", x = "Longitude", colour = "ARG richness") +
+  theme_mg_map() +
+  theme(panel.border = element_rect(colour = "sienna4", linewidth = 2),
+        axis.line = element_blank())
+
+MAP_NE
+
+
+MAP_S <- ggplot() +
+  scale_x_continuous(breaks = seq(11,14,1)) +
+  #scale_y_continuous(breaks = seq(48,55,1), limits = c(48,54.2)) +
+  geom_sf(data = region, aes(fill = region_lab), colour = "grey30", alpha = 0.3, linewidth = 0.3) +
+  geom_sf(data = sample_sf, size = 2.5, alpha = 0.5, aes(colour = Ntrapped)) +
+  geom_sf(data = cities_sf_s_3035, size = 1.5, shape = 18) +
+  geom_text_repel(data = cities_sf_s_3035, aes(label = city, geometry = geometry), stat = "sf_coordinates", colour = "grey10", box.padding = 0.2, size = 2.5) +
+  geom_text(data = subset(region, region_lab == "Bavaria"), aes(label = region_lab, geometry = geom), stat = "sf_coordinates", colour = "black", size = 3, vjust = 4) +
+  coord_sf(crs = 3035,
+           xlim = c(4356664, 4620955),  # values in meters
+           ylim = c(2737503, 3023096)) +
+  scale_fill_viridis_d() +
+    scale_colour_viridis(option = "turbo", 
+                       breaks = c(1, 5, 10, 15, 18), # key tick marks
+                       limits = c(1, 18)) +
+  guides(fill = F, colour = F) +
+  labs(y = "Latitude", x = "Longitude", colour = "ARG richness") +
+  theme_mg_map() +
+  theme(panel.border = element_rect(colour = "olivedrab4", linewidth = 2),
+        axis.line = element_blank())
+
+MAP_S
+
+
+legend <- get_legend(MAP)
+
+MAP_combined <- plot_grid(MAP + theme_void() + theme(legend.position = "none"), 
+                          MAP_NE,
+                          legend, 
+                          MAP_S,
+                          align = "tbrl")
+
+MAP_combined 
+
+# Save map as PNG
+
+ggsave(here("figures","MAP_Farm_loc_Nsamples.png"), MAP_combined, width = 15, height = 15, units = "cm", dpi = 600)
+
+# Save map as SVG
+
+ggsave(here("figures","MAP_Farm_loc_Nsamples.svg"), MAP_combined, width = 15, height = 15, units = "cm", dpi = 600)
+
+```
