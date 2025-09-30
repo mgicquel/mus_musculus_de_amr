@@ -119,7 +119,9 @@ PS_ARG_fam
 
 #View(tax_table(PS_ARG_fam))
 
-unique(data.frame(PS_ARG_fam@tax_table)$ARG_CARD_Short)
+arg_card_short <- data.frame(PS_ARG_fam@tax_table) %>%
+  dplyr::select(ARO, ARG_CARD_Short)
+  
 
 ## 98 ARG AMR gene family in 846 mice
 
@@ -666,6 +668,8 @@ write.csv(Beta.results, paste0(model_wd, "/jsdm_beta_coefficients_", date, ".csv
 
 postBeta <- getPostEstimate(m, parName = "Beta")
 saveRDS(postBeta, file=paste0(model_wd, "/jsdm_postBeta_", date, ".rds"))
+
+#postBeta <- readRDS(paste0(model_wd, "/jsdm_postBeta_", date, ".rds"))
 
 #Get species and covariate names from model
 spNames <- m$spNames
@@ -1503,6 +1507,64 @@ PLOT_VarPart_ind
 # Save the faceted plot as a PNG
 ggsave(PLOT_VarPart_ind, filename = paste0(model_wd, "/Plot_jsdm_VarPar_individual_var_", date, ".png"), 
        dpi = 600, height = 15, width = 34, units = "cm")
+```
+
+
+
+## Results for clinically relevant genes 
+
+```{r clinically relevant genes extraction}
+
+arg_clinrel <- read.csv("./data/raw/arg_clinically_relevant.csv")
+head(arg_clinrel)
+
+# identify ARGs that are clinically relevant in our data
+
+arg_clinrel_list <- arg_card_short %>%
+  mutate(key = 1) %>%
+  inner_join(arg_clinrel %>% mutate(key = 1), by = "key") %>%
+  filter(str_detect(ARG_CARD_Short, regex(Gen_groups, ignore_case = TRUE))) %>%
+  dplyr::select(-key) %>%
+  left_join(., arg_trait, by = "ARO") %>%
+  pull(ARO) 
+
+arg_clinrel_list
+
+# 94 ARO selected as clinically relevant
+
+```
+
+
+```{r filtering results}
+
+#Get species and covariate names from model
+argNames <- gsub( "\\.", ":", colnames(m$Y))
+covNames <- m$covNames
+
+#pull the data from postGamma for plotting
+mBeta <- postBeta$mean
+BetaP <- postBeta$support
+
+Beta_association_mean <- data.frame(mBeta)
+colnames(Beta_association_mean) <- argNames
+rownames(Beta_association_mean) <- covNames
+#Beta_association_values[Beta_association_values == 0] <- NA
+
+Beta_association_support <- data.frame(BetaP)
+colnames(Beta_association_support) <- argNames
+rownames(Beta_association_support) <- covNames
+
+Beta_association_values_df <- Beta_association_mean %>%
+  mutate(covNames = rownames(Beta_association_mean)) %>%
+  gather(arg, value, -covNames) %>%
+  left_join(., Beta_association_support %>%
+  mutate(covNames = rownames(Beta_association_support)) %>%
+  gather(arg, support_lvl, -covNames)  %>%
+  mutate(sign = ifelse(support_lvl > 0.95 | support_lvl < (1 - 0.95), "*", 
+                       ifelse(support_lvl > 0.75 | support_lvl < (1 - 0.75), "·", NA)))) %>%
+  filter(arg %in% arg_clinrel_list)
+   
+
 ```
 
 
