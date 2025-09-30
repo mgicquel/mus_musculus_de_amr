@@ -37,10 +37,11 @@ Posterior sampling: 4 MCMC chains, 1000/1500 samples each
 
 ## Repository Structure
 
+- data/raw             # Raw datafiles
 - data/processed       # Preprocessed ARG datasets  
-- scripts/             # Analysis scripts (HMSC models, data processing)  
-- output/              # Model outputs, variance partitioning plots  
-- figures/             # Visualization of figures for manuscript  
+- scripts/             # Analysis scripts (jSDM models, data processing)  
+- output/              # Model output files for different analyses  
+- figures/             # Figures for manuscript  
 - README.md            # Project documentation (this file)  
 
 
