@@ -40,7 +40,8 @@ Posterior sampling: 4 MCMC chains, 1000/1500 samples each
 - data/raw             # Raw datafiles
 - data/processed       # Preprocessed ARG datasets  
 - scripts/             # Analysis scripts (jSDM models, data processing)  
-- output/              # Model output files for different analyses  
+- output/              # Model output files for different analyses
+  Model outputs can be read directly in the scripts, rather than having the model run again to save time. 
 - figures/             # Figures for manuscript  
 - README.md            # Project documentation (this file)  
 
