@@ -1703,6 +1703,14 @@ PLOT_piechart_avg_var_clinrel
 ggsave(PLOT_piechart_avg_var_clinrel, filename = paste0(model_wd, "/Plot_jsdm_VarPar_AVG_CLINREL", date, ".png"), 
        dpi = 600, height = 13.57, width = 13, units = "cm")
 
+# Save the faceted plot as a PNG
+ggsave(PLOT_piechart_avg_var_clinrel, filename = here("figures", paste0("Plot_jsdm_VarPar_tot_clinrel_", date, ".png")), dpi = 600, height = 13.57, width = 13, units = "cm")
+
+# Save the faceted plot as a SVG
+ggsave(PLOT_piechart_avg_var_clinrel, filename = here("figures", paste0("Plot_jsdm_VarPar_tot_clinrel_", date, ".svg")), dpi = 600, height = 13.57, width = 13, units = "cm")
+
+
+
 
 #####
 VP.table_clinrel <- VP.table_clinrel %>%
