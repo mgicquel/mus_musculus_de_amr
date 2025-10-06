@@ -1524,21 +1524,17 @@ arg_clinrel_group <- arg_card_short %>%
   mutate(key = 1) %>%
   inner_join(arg_clinrel %>% mutate(key = 1), by = "key") %>%
   filter(str_detect(ARG_CARD_Short, regex(Gen_groups, ignore_case = TRUE))) %>%
-  dplyr::select(arg = ARO, Gen_groups) %>%
+  dplyr::select(ARO, Gen_groups) %>%
   distinct() %>%
-  left_join(., arg_trait, by = join_by(arg == ARO)) 
+  left_join(., traits_summary, by = c("ARO")) %>%
+  filter(!Gen_groups == c("arr"))
 
-arg_clinrel_list <- arg_card_short %>%
-  mutate(key = 1) %>%
-  inner_join(arg_clinrel %>% mutate(key = 1), by = "key") %>%
-  filter(str_detect(ARG_CARD_Short, regex(Gen_groups, ignore_case = TRUE))) %>%
-  dplyr::select(-key) %>%
-  left_join(., arg_trait, by = "ARO") %>%
+arg_clinrel_list <- arg_clinrel_group %>%
   pull(ARO) 
 
 arg_clinrel_list
 
-# 94 ARO selected as clinically relevant
+# 72 ARO selected as clinically relevant
 
 ```
 
@@ -1567,15 +1563,15 @@ rownames(Beta_association_support) <- covNames
 
 Beta_association_values_df_clinrel <- Beta_association_mean %>%
   mutate(covNames = rownames(Beta_association_mean)) %>%
-  gather(arg, value, -covNames) %>%
+  gather(ARO, value, -covNames) %>%
   left_join(., Beta_association_support %>%
   mutate(covNames = rownames(Beta_association_support)) %>%
-  gather(arg, support_lvl, -covNames)) %>%
-  filter(arg %in% arg_clinrel_list) %>%
+  gather(ARO, support_lvl, -covNames)) %>%
+  filter(ARO %in% arg_clinrel_list) %>%
   mutate(covNames = factor(covNames, levels = c("(Intercept)", "sexM", "BMI", "Ntrapped", "agri", "imperv", "tcd", "swf", "dist_road", "dist_path", "cat_dens", "pig_dens", "pou_dens", "precipitation_aug", "air_temp_aug"),
                            labels = c("(Intercept)", "sex-M", "BMI", "Ntrapped", "agri", "imperv", "tcd", "swf", "dist_road", "dist_path", "cat_dens", "pig_dens", "pou_dens", "precip", "temp"))) %>%
-  left_join(., arg_clinrel_group, by = "arg") %>%
-  group_by(Gen_groups, covNames) %>%
+  left_join(., arg_clinrel_group, by = "ARO") %>%
+  group_by(Gen_groups, Resistance_Mechanism, covNames) %>%
   summarise(value = mean(value),
             support_lvl = mean(support_lvl)) %>%
   mutate(sign = ifelse(support_lvl > 0.95 | support_lvl < (1 - 0.95), "*", 
@@ -1607,7 +1603,7 @@ PLOT_Est_clinrel <- Beta_association_values_df_clinrel %>%
                        na.value="grey99") +
   scale_x_discrete(position = "top", guide = guide_axis(angle = 90)) +
 #  facet_col(type ~ group, scales = "free_x",  space = "free", strip.position = c("top", "right")) +
-  facet_grid(~ group, scales = "free", space = "free", switch = "y") +
+  facet_grid(Resistance_Mechanism ~ group, scales = "free", space = "free", switch = "y") +
   labs(fill = "Coefficient estimate") +
   theme_mg_facets() +
   theme(
@@ -1634,6 +1630,60 @@ ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_clinrel
 # Save the plot as a SVG
 
 ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_clinrel_est_", date, ".svg")), height = 20, width = 16, units = "cm", dpi = 600)
+
+######### Alternative plot
+
+PLOT_Est_clinrel <- Beta_association_values_df_clinrel %>%
+  #full_join(N_arg) %>%
+  mutate(covNames = factor(covNames, levels = c("(Intercept)","sex-M", "BMI", "Ntrapped", "agri", "imperv", "tcd", "swf", "dist_road", "dist_path", "cat_dens", "pig_dens", "pou_dens", "precip", "temp", "# ARG", "# mice","# farm"))) %>%
+  mutate(group = case_when(covNames %in% c("sex-M", "BMI") ~ "Mouse\ncharacteristics",
+                           covNames == c("Ntrapped") ~ "Mouse\ndensity",
+                           covNames %in% c("agri", "imperv", "tcd", "swf") ~ "Landcover",
+                           covNames %in% c("dist_road", "dist_path") ~ "Accessibility",
+                           covNames %in% c("cat_dens", "pig_dens", "pou_dens") ~ "Farm animal\ndensity",
+                           covNames %in% c("precip", "temp") ~ "Climatic",
+                           covNames %in% c("# ARG", "# mice","# farm") ~ "Sample\nsize"),
+         group = factor(group, levels = c("Mouse\ncharacteristics","Mouse\ndensity","Landcover","Accessibility","Farm animal\ndensity","Climatic","Sample\nsize"))) %>%
+  filter(covNames != "(Intercept)") %>%
+  ggplot(., aes(y = Resistance_Mechanism, x = covNames, fill = value)) +
+  geom_tile(colour = "black") +
+  geom_text(aes(label = sign), size = 5, colour = "black") +
+  #geom_text(aes(label = sample), size = 2.5, family = "Poppins") +
+  #scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0,limits = c(-4.5, 10.5)) +
+  scale_fill_gradientn(colors = c("blue4", "blue3","white", "red3","red4"),
+                       values = scales::rescale(c(-5,-2, 0, 5, 10)),
+                       breaks = c(-5,0,5,10),
+                       limits = c(-5,10.5),
+                       na.value="grey99") +
+  scale_x_discrete(position = "top", guide = guide_axis(angle = 90)) +
+#  facet_col(type ~ group, scales = "free_x",  space = "free", strip.position = c("top", "right")) +
+  facet_grid(Gen_groups ~ group, scales = "free", space = "free", switch = "y") +
+  labs(fill = "Coefficient estimate") +
+  theme_mg_facets() +
+  theme(
+    text = element_text(size = 8),
+    axis.text.y = element_text(hjust = 1, vjust = 0.4, size = 8),
+    axis.text.x = element_text(size = 8),
+    axis.title = element_blank(),
+    axis.line = element_blank(),
+    legend.position = "bottom",
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    strip.placement = "outside",
+    strip.background = element_rect(fill = "grey90", colour = "grey"),
+    strip.text.x = element_text(angle = 90, size = 8),
+    strip.text.y.left = element_text(angle = 0, size = 8),
+    panel.spacing = unit(0, "cm"))
+
+PLOT_Est_clinrel
+
+# Save the plot as a PNG
+
+ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_clinrel_est_alt_", date, ".png")), height = 20, width = 16, units = "cm", dpi = 600)
+
+# Save the plot as a SVG
+
+ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_clinrel_est_alt_", date, ".svg")), height = 20, width = 16, units = "cm", dpi = 600)
 
 
 
