@@ -1687,7 +1687,6 @@ ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_clinrel
 
 
 
-
 ```
 
 
@@ -1704,7 +1703,7 @@ VP.table_clinrel <- data.frame(VP$vals) %>%
                          levels = c("mouse_characteristics", "mouse_dens", "landcover","accessibility", "farm_animals",  "climatic", "Random: spatial_autocorrelation", "Random: farm_ID", "Random: year"),  
                          labels = c("Mouse characteristics","Mouse density", "Landcover", "Accessibility", "Farm animals density",  "Climatic", "Random: Spatial autocorrelation", "Random: Farm ID", "Random: Year")),
           ARO = gsub("\\.", ":", factor(ARO))) %>%
-  left_join(., arg_clinrel_group, by = join_by(ARO == arg)) %>%
+  left_join(., arg_clinrel_group, by = join_by(ARO)) %>%
   filter(ARO %in% arg_clinrel_list) %>%
   distinct()
 
