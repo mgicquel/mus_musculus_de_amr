@@ -92,8 +92,6 @@ names(env_cov)
 
 
 
-
-
 ### load germany map
 
 ```{r}
@@ -206,36 +204,54 @@ write.csv(ARG_norm_mice_data_env100m, "./data/processed/Table_ARG_norm_mice_envc
 ```{r variable correlation}
 ## get correlations
 correlations_table <- data.frame(ARG_mice_sf) %>% 
-  dplyr::select(-mouseID, -sex, -clc, -clc_fct, -gem_char, -region, -geometry) %>%
+  dplyr::select(-mouseID, -sex, -ID, -batch, -loc, -CATO, -PITO, -POTO, -gem_char, -region, -geometry) %>%
   mutate_all(., function(x) as.numeric(as.character(x)))
 
 cor_mice <- cor(correlations_table, use = "pairwise.complete.obs")
 
-RColorBrewer::brewer.pal(n = 8, name = "RdBu")
+# Get data used by ggcorrplot
+cor_data <- fortify(cor_mice) %>%
+  mutate(cov1 = rownames(cor_mice)) %>%
+  gather(cov2, value, -cov1) %>%
+  mutate(sign = ifelse(value > 0.7 | value < -0.7, "*", NA)) %>%
+  filter(!(cov1 == cov2)) %>%
+  mutate(
+    cov1 = factor(cov1, levels = rownames(cor_mice)),
+    cov2 = factor(cov2, levels = colnames(cor_mice))
+  ) %>%
+  filter(as.numeric(cov1) < as.numeric(cov2))   
 
-mycorplot <- ggcorrplot::ggcorrplot(cor_mice, 
-                       type = "lower", 
-                       outline.color = "white",
-                       lab = TRUE,
-                       ggtheme = ggplot2::theme_minimal,
-                       # ggtheme = ggplot2::theme(axis.line = element_line(col = "black")),
-                       # colors = c("#6D9EC1", "white", "#E46726")) +
-                       colors = c("#B2182B", "white", "#2166AC")) +
-  theme(axis.line = element_line(colour = "black"), 
-        plot.background = element_rect(colour = "transparent", fill = "white"))
+
+mycorplot <- cor_data %>%
+  ggplot(., aes(y = cov1, x = cov2, fill = value)) +
+  geom_tile(colour = "black") +
+  geom_text(aes(label = sign), size = 5, colour = "black") +
+  scale_fill_gradientn(colors = c("blue4","white","red4"), limits = c(-1,1)) +
+  scale_x_discrete(position = "bottom", guide = guide_axis(angle = 90)) +
+  labs(fill = "Pearson correlation:") +
+  theme_mg() +
+  theme(
+    text = element_text(size = 8),
+    axis.text.y = element_text(hjust = 1, vjust = 0.4, size = 8),
+    axis.text.x = element_text(size = 8),
+    axis.title = element_blank(),
+    axis.line = element_blank(),
+    legend.position = "bottom",
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    panel.spacing = unit(0, "cm"))
   
 mycorplot
 
 ggsave(plot = mycorplot, 
-       filename = "./output/plots/mice_envcov_correlations.png", 
-       dpi = 600, width = 6, height = 6)
+       filename = here("figures", "appendices", "Plot_correlation_envcov.png"), height = 16, width = 16, units = "cm", dpi = 600)
 
 ```
 
 ```{r variable correlation climatic}
 ## get correlations
 reduced_correlations_table <- data.frame(ARG_mice_sf) %>% 
-  dplyr::select(-mouseID, -sex, -clc, -clc_fct, -gem_char, -region, -geometry) %>%
+  dplyr::select(-mouseID, -sex, -ID, -batch, -loc, -CATO, -PITO, -POTO, -gem_char, -region, -geometry) %>%
   dplyr::select(temp_aug_2015, temp_aug_2016, temp_aug_2017, temp_aug_2018, temp_aug_2019, temp_aug_2021, temp_aug_2022,
                 prec_aug_2015, prec_aug_2016, prec_aug_2017, prec_aug_2018, prec_aug_2019, prec_aug_2021, prec_aug_2022)
 
@@ -269,8 +285,7 @@ hist(data.frame(ARG_mice_sf)$pou_dens)
 hist(data.frame(ARG_mice_sf)$cat_dens)
 
 cov_mice_long <- data.frame(ARG_mice_sf) %>% 
-  mutate(clc_fct = as.numeric(as.character(clc_fct))) %>%
-  pivot_longer(cols = !c(mouseID, sex, clc, gem_char), 
+  pivot_longer(cols = !c(mouseID, sex, agri, gem_char), 
                names_to = "variable")
 
 head(cov_mice_long, 20)
