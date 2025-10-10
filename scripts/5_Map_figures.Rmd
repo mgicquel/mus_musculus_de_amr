@@ -196,9 +196,6 @@ cities_sf_s_3035 <- st_intersection(cities_sf_3035, bbox_s_3035)
 
 ```{r}
 
-library(ggrepel)
-library(ggspatial)
-
 MAP <- ggplot() +
   #scale_x_continuous(breaks = seq(9,17,1), limits = c(9,17)) +
   #scale_y_continuous(breaks = seq(48,55,1), limits = c(48,54.2)) +
@@ -300,3 +297,96 @@ ggsave(here("figures","MAP_Farm_loc_Nsamples.png"), MAP_combined, width = 15, he
 ggsave(here("figures","MAP_Farm_loc_Nsamples.svg"), MAP_combined, width = 15, height = 15, units = "cm", dpi = 600)
 
 ```
+
+
+# Maps of spatial layers for appendix
+
+```{r load raster stack}
+
+env_cov <- rast("./data/processed/geo/stack_env_covariates_germany_100m_3035.tif")
+names(env_cov)
+
+env_cov_sub <- env_cov[[!names(env_cov) %in% c("CATO", "PITO", "POTO", "gem_char", "prec_aug_2016", "prec_aug_2017", "prec_aug_2018", "prec_aug_2019", "prec_aug_2021", "prec_aug_2022", "temp_aug_2016", "temp_aug_2017", "temp_aug_2018", "temp_aug_2019", "temp_aug_2021", "temp_aug_2022")]]  # remove certain layers
+names(env_cov_sub)
+
+region_sub <- region %>%
+  filter(region_lab %in% c("Brandenburg","Mecklenburg-Vorpommern","Bavaria","Berlin")) %>%
+  mutate(region_bin = case_when(region_lab %in% c("Brandenburg","Mecklenburg-Vorpommern","Berlin") ~ "Berlin–Brandenburg–MV",
+                                TRUE ~ "Bavaria")) %>%
+  vect(.)
+
+env_cov_sub <- crop(env_cov_sub, region_sub, mask = TRUE)
+
+
+```
+
+
+
+```{r}
+library(ggh4x)
+
+p <- ggplot() +
+  geom_spatraster(data = env_cov_sub, aes(fill = agri)) +
+  geom_spatvector(data = region_sub, colour = "grey30", fill = NA, alpha = 0.3, linewidth = 0.3) +
+  annotate("text", x = 4450000, y = 3550000, label = "Berlin–Brandenburg–MV", size = 4.5, family = "Poppins", colour = "grey10") +
+  annotate("text", x = 4450000, y = 3100000, label = "Bavaria", size = 4.5, family = "Poppins", colour = "grey10") +
+  scale_fill_viridis(option = "magma", na.value = NA) +
+  guides(fill = guide_colourbar(barheight = unit(0.25, "cm"), barwidth = unit(2, "cm"))) +
+  labs(y = "Latitude", x = "Longitude", fill= "") +
+  facet_wrap(~lyr) +
+  theme_mg() +
+    theme(legend.position = "bottom",
+          legend.direction = "horizontal",
+          legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+          axis.title = element_blank(),
+          title = element_text(size = 7),
+          axis.text = element_text(size = 6),
+          legend.text = element_text(size = 6),
+          axis.text.x = element_text(angle=45, hjust = 0, vjust = 0))
+
+p
+
+
+plots <- lapply(names(env_cov_sub), function(lyr_name) {
+  
+  lyr_rast <- env_cov_sub[[lyr_name]]
+  
+  ggplot() +
+    geom_spatraster(data = lyr_rast) +
+    geom_spatvector(data = region_sub, colour = "grey30", fill = NA, alpha = 0.3, linewidth = 0.3) +
+    annotate("text", x = 4450000, y = 3550000, label = "Berlin–Brandenburg–MV", size = 2, family = "Poppins", colour = "grey10") +
+    annotate("text", x = 4450000, y = 3100000, label = "Bavaria", size = 2, family = "Poppins", colour = "grey10") +
+  scale_fill_viridis(na.value = NA) +
+  guides(fill = guide_colourbar(barheight = unit(0.25, "cm"), barwidth = unit(2, "cm"))) +
+  labs(y = "Latitude", x = "Longitude", fill= "", title = lyr_name) +
+    theme_mg_map() +
+    theme(legend.position = "bottom",
+          legend.direction = "horizontal",
+          legend.margin=margin(0,0,0,0),
+          legend.box.margin=margin(-10,-10,-10,0),
+          axis.title = element_blank(),
+          title = element_text(size = 7),
+          axis.text = element_text(size = 6),
+          legend.text = element_text(size = 6),
+          axis.text.x = element_text(angle=45, hjust = 0, vjust = 0))
+  
+})
+
+
+library(patchwork)
+combined_plot <- wrap_plots(plots, ncol = 3)
+
+print(combined_plot)
+
+
+# Save map as PNG
+
+ggsave(here("figures", "appendices", "Maps_env_cov.png"), combined_plot, width = 16, height = 24, units = "cm", dpi = 600)
+
+# Save map as SVG
+
+ggsave(here("figures", "appendices", "Maps_env_cov.svg"), combined_plot, width = 16, height = 24, units = "cm", dpi = 600)
+
+```
+
