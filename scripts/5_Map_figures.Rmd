@@ -1,7 +1,7 @@
 ---
-title: "ARGs in mice gut microbiome - MAP"
+title: "ARGs in mice gut microbiome - MAPs"
 subtitle: "Morgane Gicquel"
-date: "2025-06-12"
+date: "2025-10-10"
 output:
   officedown::rdocx_document:
     reference_docx: D:/PopDynCloud/Projects/mus_musculus_de_amr_gicquel_m/misc/TEMPLATE_meeting.docx
@@ -315,6 +315,8 @@ region_sub <- region %>%
                                 TRUE ~ "Bavaria")) %>%
   vect(.)
 
+
+
 env_cov_sub <- crop(env_cov_sub, region_sub, mask = TRUE)
 
 
@@ -324,26 +326,29 @@ env_cov_sub <- crop(env_cov_sub, region_sub, mask = TRUE)
 
 ```{r}
 library(ggh4x)
+library(patchwork)
 
 p <- ggplot() +
   geom_spatraster(data = env_cov_sub, aes(fill = agri)) +
-  geom_spatvector(data = region_sub, colour = "grey30", fill = NA, alpha = 0.3, linewidth = 0.3) +
+  geom_spatvector(data = region, colour = "grey30", fill = NA, alpha = 0.3, linewidth = 0.3) +
   annotate("text", x = 4450000, y = 3550000, label = "Berlin–Brandenburg–MV", size = 4.5, family = "Poppins", colour = "grey10") +
   annotate("text", x = 4450000, y = 3100000, label = "Bavaria", size = 4.5, family = "Poppins", colour = "grey10") +
   scale_fill_viridis(option = "magma", na.value = NA) +
-  guides(fill = guide_colourbar(barheight = unit(0.25, "cm"), barwidth = unit(2, "cm"))) +
+  guides(fill = guide_colourbar(barheight = unit(0.25, "cm"), barwidth = unit(2.2, "cm"))) +
   labs(y = "Latitude", x = "Longitude", fill= "") +
+  coord_sf(xlim = c(4250000,4650000), ylim = c(2700000,3550000)) +
   facet_wrap(~lyr) +
   theme_mg() +
     theme(legend.position = "bottom",
           legend.direction = "horizontal",
-          legend.margin=margin(0,0,0,0),
-        legend.box.margin=margin(-10,-10,-10,-10),
+          legend.margin=margin(-10,-10,0,-10),
+          legend.box.margin=margin(-10,-10,1,-10),
           axis.title = element_blank(),
-          title = element_text(size = 7),
+          title = element_text(size = 7, hjust = 0),
           axis.text = element_text(size = 6),
           legend.text = element_text(size = 6),
-          axis.text.x = element_text(angle=45, hjust = 0, vjust = 0))
+          axis.text.x = element_text(angle= 45, hjust = 0.5, vjust = 1),
+          axis.text.y = element_text(margin = margin(r = 0.01)))
 
 p
 
@@ -354,28 +359,30 @@ plots <- lapply(names(env_cov_sub), function(lyr_name) {
   
   ggplot() +
     geom_spatraster(data = lyr_rast) +
-    geom_spatvector(data = region_sub, colour = "grey30", fill = NA, alpha = 0.3, linewidth = 0.3) +
+    geom_spatvector(data = region, colour = "grey30", fill = NA, alpha = 0.3, linewidth = 0.3) +
     annotate("text", x = 4450000, y = 3550000, label = "Berlin–Brandenburg–MV", size = 2, family = "Poppins", colour = "grey10") +
     annotate("text", x = 4450000, y = 3100000, label = "Bavaria", size = 2, family = "Poppins", colour = "grey10") +
   scale_fill_viridis(na.value = NA) +
-  guides(fill = guide_colourbar(barheight = unit(0.25, "cm"), barwidth = unit(2, "cm"))) +
+  guides(fill = guide_colourbar(barheight = unit(0.25, "cm"), barwidth = unit(2.2, "cm"))) +
+      coord_sf(xlim = c(4250000,4650000), ylim = c(2700000,3550000)) +
   labs(y = "Latitude", x = "Longitude", fill= "", title = lyr_name) +
     theme_mg_map() +
     theme(legend.position = "bottom",
           legend.direction = "horizontal",
-          legend.margin=margin(0,0,0,0),
-          legend.box.margin=margin(-10,-10,-10,0),
+          legend.margin=margin(-10,-10,0,0),
+          legend.box.margin=margin(-10,-10,1,-10),
           axis.title = element_blank(),
-          title = element_text(size = 7),
+          plot.title = element_text(size = 7),
           axis.text = element_text(size = 6),
           legend.text = element_text(size = 6),
-          axis.text.x = element_text(angle=45, hjust = 0, vjust = 0))
+          axis.text.x = element_text(angle=45, hjust = 0.5, vjust = 1),,
+          axis.text.y = element_text(margin = margin(r = 0.01)))
   
 })
 
 
-library(patchwork)
-combined_plot <- wrap_plots(plots, ncol = 3)
+
+combined_plot <- wrap_plots(plots, ncol = 4)
 
 print(combined_plot)
 
