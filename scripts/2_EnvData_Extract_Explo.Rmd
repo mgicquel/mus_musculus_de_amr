@@ -169,7 +169,6 @@ head(ARG_mice_data_env100m)
 write.csv(ARG_mice_data_env100m, "./data/processed/Table_ARG_mice_envcov_100m_202507.csv", row.names = FALSE)
 
 
-
 ```
 
 
