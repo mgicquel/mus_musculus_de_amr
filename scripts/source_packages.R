@@ -14,3 +14,8 @@ for (i in 1:length(mylibraries)) {
 
 lapply(mylibraries, require, character.only = TRUE)
 
+
+## Install phyloseq (bioconductor) - R v4.4.3
+# if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+# BiocManager::install(version = "3.20")
+# BiocManager::install(c("phyloseq"))
