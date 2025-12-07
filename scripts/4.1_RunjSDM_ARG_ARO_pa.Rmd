@@ -1,6 +1,6 @@
 ---
 title: "4 - Mice ARGs - jSDM"
-author: "Morgane Gicquel"
+author: "Morgane Gicquel and Aimara Planillo"
 date: "2025-08-05"
 output: html_document
 editor_options: 
