@@ -625,6 +625,33 @@ modelr2.explanatory
 mean(modelr2.explanatory$R2, na.rm=T)
 # [1] 0.2165996
 
+# AUC of the model: cannot be computed directly, we need to do it manually for each response
+library(pROC)
+
+auc_vector <- vector()
+for(i in 1:ncol(m$Y)){
+  obs <- m$Y[, i]         # observed counts
+  obs_bin <- ifelse(obs > 0, 1, 0) # binary response
+  pred <- preds[, ,1][,i]    # predicted Poisson mean
+
+  # convert predicted Poisson mean to probability of presence
+  prob_presence <- 1 - exp(-pred)
+  
+  if (length(unique(obs_bin)) == 2) {
+    roc_result <- roc(response = obs_bin, predictor = prob_presence)
+    auc_val <- auc(roc_result)
+    } else {
+      auc_val <- NA   # or "Not applicable"
+      }
+  auc_vector <- c(auc_vector, auc_val)
+}
+
+
+auc_model <- mean(auc_vector, na.rm = TRUE)
+auc_model
+# [1] 0.7955589
+
+
 # RMSE of the model
 mean(modelr2.explanatory$RMSE, na.rm=T)
 # [1] 0.6297417
