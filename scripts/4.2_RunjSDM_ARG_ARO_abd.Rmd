@@ -1,6 +1,6 @@
 ---
 title: "4.2 - Mice ARGs - jSDM - Abundance"
-author: "Morgane Gicquel"
+author: "Morgane Gicquel and Aimara Planillo"
 date: "2025-08-22"
 output: html_document
 editor_options: 
