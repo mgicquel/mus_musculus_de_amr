@@ -58,7 +58,7 @@ Traits:
 #setwd("/mnt/dep6/gicquel/mus_musculus_de_amr_gicquel_m/")
 
 # Indicate date of the current run
-date <- "2025-10-08"
+date <- "2025-10-20"
 
 # Loading packages needed, as well as custom ggplot themes
 source("scripts/source_packages.R") # R libraries
@@ -1007,11 +1007,11 @@ PLOT_Gamma_all
 
 # Save the plot as a PNG
 
-#ggsave(PLOT_Gamma_all , filename = here("figures", paste0("Plot_jsdm_pa_HI_traits_gammas_", date, ".png")), height = 20, width = 16, units = "cm", dpi = 600)
+ggsave(PLOT_Gamma_all , filename = here("figures", paste0("Plot_jsdm_pa_HI_traits_gammas_", date, ".png")), height = 20, width = 16, units = "cm", dpi = 600)
 
-# Save the plot as a SVG
+ # Save the plot as a SVG
 
-#ggsave(PLOT_Gamma_all , filename = here("figures", paste0("Plot_jsdm_pa_HI_traits_gammas_", date, ".svg")), height = 20, width = 16, units = "cm", dpi = 600)
+ggsave(PLOT_Gamma_all , filename = here("figures", paste0("Plot_jsdm_pa_HI_traits_gammas_", date, ".svg")), height = 20, width = 16, units = "cm", dpi = 600)
 
 ```
 
@@ -1214,7 +1214,7 @@ Mean_VP <- VP.table %>%
 PLOT_piechart_avg_var <- ggplot(Mean_VP, aes(x = 2, y = mean_var, fill = Factor, alpha = Factor)) +
   geom_bar(stat = "identity", colour = "white") +
   geom_text_repel(aes(y = texty, label = mean_var, colour = colour_grp), size = 3, family = "Poppins", nudge_x = 1, 
-            show_guide = FALSE) +
+            show.legend = FALSE) +
   scale_fill_manual(values = setNames(Mean_VP$colour_grp, Mean_VP$Factor)) +
   scale_colour_identity() +
   scale_alpha_manual(values = setNames(scales::rescale(as.numeric(Mean_VP$alpha_group), to = c(1, 0.4), from = range(Mean_VP$alpha_group, na.rm = TRUE)), Mean_VP$Factor)) +
@@ -1290,7 +1290,7 @@ Mean_VP_mobile <- VP.table %>%
 PLOT_piechart_avg_var_mobile <- ggplot(data = Mean_VP_mobile, aes(x = 2, y = mean_var, fill = Factor, alpha = Factor)) +
   geom_bar(stat = "identity", colour = "white") +
   geom_text_repel(aes(y = texty, label = mean_var, colour = colour_grp), size = 3, family = "Poppins", nudge_x = 1, 
-            show_guide = FALSE) +
+            show.legend = FALSE) +
   scale_fill_manual(values = setNames(Mean_VP_mobile$colour_grp, Mean_VP_mobile$Factor)) +
   scale_colour_identity() +
   scale_alpha_manual(values = setNames(scales::rescale(as.numeric(Mean_VP_mobile$alpha_group), to = c(1, 0.4), from = range(Mean_VP_mobile$alpha_group, na.rm = TRUE)), Mean_VP_mobile$Factor)) +
@@ -1328,13 +1328,11 @@ PLOT_Avg_VarPart_tot_mob
 
 # Save the plot as a PNG
 
-#ggsave(PLOT_Avg_VarPart_tot_mob, filename = here("figures", paste0("Plot_jsdm_pa_HI_varpart_tot_mob_", date, ".png")), height = 10, width = 16, units = "cm", dpi = 600)
+ggsave(PLOT_Avg_VarPart_tot_mob, filename = here("figures", paste0("Plot_jsdm_pa_HI_varpart_tot_mob_", date, ".png")), height = 10, width = 16, units = "cm", dpi = 600)
 
 # Save the plot as a SVG
 
-#ggsave(PLOT_Avg_VarPart_tot_mob, filename = here("figures", paste0("Plot_jsdm_pa_HI_varpart_tot_mob_", date, ".svg")), height = 10, width = 16, units = "cm", dpi = 600)
-
-
+ggsave(PLOT_Avg_VarPart_tot_mob, filename = here("figures", paste0("Plot_jsdm_pa_HI_varpart_tot_mob_", date, ".svg")), height = 10, width = 16, units = "cm", dpi = 600)
 ```
 
 ### Variance partitioning for each traits
@@ -1401,11 +1399,11 @@ Plot_VarPart_traits <- plot_grid(Var_loc + theme(legend.position = "none"),
 
 # Save the plot as a PNG
 
-#ggsave(Plot_VarPart_traits, filename = here("figures", paste0("Plot_jsdm_pa_HI_traits_varpart_", date, ".png")), height = 16, width = 16, units = "cm", dpi = 600)
+ggsave(Plot_VarPart_traits, filename = here("figures", paste0("Plot_jsdm_pa_HI_traits_varpart_", date, ".png")), height = 16, width = 16, units = "cm", dpi = 600)
 
 # Save the plot as a SVG
 
-#ggsave(Plot_VarPart_traits, filename = here("figures", paste0("Plot_jsdm_pa_HI_traits_varpart_", date, ".svg")), height = 16, width = 16, units = "cm", dpi = 600)
+ggsave(Plot_VarPart_traits, filename = here("figures", paste0("Plot_jsdm_pa_HI_traits_varpart_", date, ".svg")), height = 16, width = 16, units = "cm", dpi = 600)
 
 
 ```
@@ -1627,11 +1625,11 @@ PLOT_Est_clinrel
 
 # Save the plot as a PNG
 
-#ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_clinrel_est_", date, ".png")), height = 20, width = 16, units = "cm", dpi = 600)
+ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_clinrel_est_", date, ".png")), height = 20, width = 16, units = "cm", dpi = 600)
 
 # Save the plot as a SVG
 
-#ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_clinrel_est_", date, ".svg")), height = 20, width = 16, units = "cm", dpi = 600)
+ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_clinrel_est_", date, ".svg")), height = 20, width = 16, units = "cm", dpi = 600)
 
 ######### Alternative plot
 
@@ -1681,11 +1679,11 @@ PLOT_Est_clinrel
 
 # Save the plot as a PNG
 
-#ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_clinrel_est_alt_", date, ".png")), height = 20, width = 16, units = "cm", dpi = 600)
+ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_clinrel_est_alt_", date, ".png")), height = 20, width = 16, units = "cm", dpi = 600)
 
 # Save the plot as a SVG
 
-#ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_clinrel_est_alt_", date, ".svg")), height = 20, width = 16, units = "cm", dpi = 600)
+ggsave(PLOT_Est_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_clinrel_est_alt_", date, ".svg")), height = 20, width = 16, units = "cm", dpi = 600)
 
 
 
@@ -1755,10 +1753,10 @@ ggsave(PLOT_piechart_avg_var_clinrel, filename = paste0(model_wd, "/Plot_jsdm_Va
        dpi = 600, height = 13.57, width = 13, units = "cm")
 
 # Save the faceted plot as a PNG
-#ggsave(PLOT_piechart_avg_var_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_VarPar_tot_clinrel_", date, ".png")), dpi = 600, height = 13.57, width = 13, units = "cm")
+ggsave(PLOT_piechart_avg_var_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_VarPar_tot_clinrel_", date, ".png")), dpi = 600, height = 13.57, width = 13, units = "cm")
 
 # Save the faceted plot as a SVG
-#ggsave(PLOT_piechart_avg_var_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_VarPar_tot_clinrel_", date, ".svg")), dpi = 600, height = 13.57, width = 13, units = "cm")
+ggsave(PLOT_piechart_avg_var_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_VarPar_tot_clinrel_", date, ".svg")), dpi = 600, height = 13.57, width = 13, units = "cm")
 
 
 
@@ -1787,10 +1785,10 @@ PLOT_VarPart_clinrel <- VP.table_clinrel %>%
 PLOT_VarPart_clinrel
 
 # Save the faceted plot as a PNG
-#ggsave(PLOT_VarPart_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_VarPar_clinrel_", date, ".png")), dpi = 600, height = 15, width = 16, units = "cm")
+ggsave(PLOT_VarPart_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_VarPar_clinrel_", date, ".png")), dpi = 600, height = 15, width = 16, units = "cm")
 
 # Save the faceted plot as a SVG
-#ggsave(PLOT_VarPart_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_VarPar_clinrel_", date, ".svg")), dpi = 600, height = 15, width = 16, units = "cm")
+ggsave(PLOT_VarPart_clinrel, filename = here("figures", paste0("Plot_jsdm_pa_HI_VarPar_clinrel_", date, ".svg")), dpi = 600, height = 15, width = 16, units = "cm")
 
 ```
 
