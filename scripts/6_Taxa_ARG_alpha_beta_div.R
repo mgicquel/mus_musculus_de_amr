@@ -215,25 +215,23 @@ sample_data_all_house%>%
                 Tax_mapped= Tax_mapped+1,
                 observed_arg_rtk= replace_na(observed_arg_rtk, 0),
                 observed_arg= replace_na(observed_arg, 0))%>%
-  dplyr::select(c(Total_reads, Filtered_reads, Tax_mapped, Seq_batch, observed_mOTUs_rare, observed_arg))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg))%>%
   dplyr::rename("Total Reads" = "Total_reads",
-                "Preproc. Reads" = "Filtered_reads",
-                "Taxa Reads" = "Tax_mapped",
+                "Filtered Reads" = "Filtered_reads",
                 "Taxa (mOTUs)" = "observed_mOTUs_rare",
                 "ARGs"= "observed_arg")%>%
   pivot_longer(!Seq_batch, names_to = "measurment", values_to = "value")%>%
-  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Preproc. Reads",
-                                        "Taxa Reads", "Taxa (mOTUs)",
-                                        "ARGs"))%>%
+  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Filtered Reads",
+                                        "Taxa (mOTUs)", "ARGs"))%>%
   ggplot(aes(x= Seq_batch, y= value))+
   geom_violin(alpha= 0.5, trim=F)+
-  geom_point(shape=21, position=position_jitter(0.2), size=2, aes(fill= Seq_batch), color= "black")+
+  geom_point(shape=21, position=position_jitter(0.2), size=1.5, alpha=0.1, aes(fill= Seq_batch), color= "black")+
   scale_fill_manual(values = pal.batch)+
   labs(tag= "a")+
   theme_minimal()+
-  facet_wrap(~measurment,  nrow=4, scales= "free")+
+  facet_wrap(~measurment,  ncol=4, scales= "free")+
   facetted_pos_scales(
-    y = list(measurment %in% c("Total Reads", "Preproc. Reads", "Taxa Reads") ~
+    y = list(measurment %in% c("Total Reads", "Filtered Reads") ~
                scale_y_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
                              labels = scales::trans_format("log10", scales::math_format(10^.x)),
                              guide  = "axis_logticks"),
@@ -241,8 +239,14 @@ sample_data_all_house%>%
                scale_y_continuous(labels = scales::label_number(accuracy = 1))))+
   theme(text = element_text(size=16),
         axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
         axis.text.x = element_blank(),
         legend.position = "none")-> Supp0A
+
+##Add the median
+Supp0A + stat_summary(fun = median, geom = "point",
+    size = 3, shape = 21,  fill = "black", color = "black",
+    position = position_dodge(width = 0.6))-> Supp0A
 
 ##Statistical comparison
 require("rstatix")
@@ -255,19 +259,42 @@ sample_data_all_house%>%
                 Tax_mapped= Tax_mapped+1,
                 observed_arg_rtk= replace_na(observed_arg_rtk, 0),
                 observed_arg= replace_na(observed_arg, 0))%>%
-  dplyr::select(c(Total_reads, Filtered_reads, Tax_mapped, Seq_batch, observed_mOTUs_rare, observed_arg))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg))%>%
   dplyr::rename("Total Reads" = "Total_reads",
-                "Preproc. Reads" = "Filtered_reads",
-                "Taxa Reads" = "Tax_mapped",
+                "Filtered Reads" = "Filtered_reads",
                 "Taxa (mOTUs)" = "observed_mOTUs_rare",
                 "ARGs"= "observed_arg")%>%
   pivot_longer(!Seq_batch, names_to = "measurment", values_to = "value")%>%
-  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Preproc. Reads",
-                                        "Taxa Reads", "Taxa (mOTUs)",
-                                        "ARGs"))%>%
+  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Filtered Reads",
+                                        "Taxa (mOTUs)", "ARGs"))%>%
   dplyr::group_by(measurment)%>%
   wilcox_test(value ~ Seq_batch, alternative = "two.sided")%>%
   add_significance()-> stats.test.batch
+
+##Effect size
+sample_data_all_house%>%
+  rownames_to_column("Sample_ID")%>%
+  left_join(alpha.diversity, by= "Sample_ID")%>%
+  left_join(arg.mapped, by= "Sample_ID")%>%
+  dplyr::mutate(arg_str_mapped= replace_na(arg_str_mapped, 0),
+                Filtered_reads= Filtered_reads+1,
+                Tax_mapped= Tax_mapped+1,
+                observed_arg_rtk= replace_na(observed_arg_rtk, 0),
+                observed_arg= replace_na(observed_arg, 0))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg))%>%
+  dplyr::rename("Total Reads" = "Total_reads",
+                "Filtered Reads" = "Filtered_reads",
+                "Taxa (mOTUs)" = "observed_mOTUs_rare",
+                "ARGs"= "observed_arg")%>%
+  pivot_longer(!Seq_batch, names_to = "measurment", values_to = "value")%>%
+  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Filtered Reads",
+                                        "Taxa (mOTUs)", "ARGs"))%>%
+  dplyr::group_by(measurment)%>%
+  wilcox_effsize(value ~ Seq_batch, alternative = "two.sided")%>%
+  dplyr::select(c(measurment, effsize, magnitude))%>%
+  left_join(stats.test.batch, by= "measurment")%>%
+  relocate(c(effsize, magnitude), .after = p.signif)%>%
+  dplyr::select(!`.y.`)->stats.test.batch
 
 ##Yearly differences in reads used for taxa and arg, taxa annotated reads and mOTUs
 sample_data_all_house%>%
@@ -284,24 +311,21 @@ sample_data_all_house%>%
                                   "2015", "2016",
                                   "2017", "2018",
                                   "2019", "2021","2022"))%>%
-  dplyr::select(c(Total_reads, Filtered_reads, Tax_mapped, Seq_batch, observed_mOTUs_rare, Year))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, Year))%>%
   dplyr::rename("Total Reads" = "Total_reads",
-                "Preproc. Reads" = "Filtered_reads",
-                "Taxa Reads" = "Tax_mapped",
+                "Filtered Reads" = "Filtered_reads",
                 "Taxa (mOTUs)" = "observed_mOTUs_rare")%>%
   pivot_longer(!c(Seq_batch, Year), names_to = "measurment", values_to = "value")%>%
-  dplyr::filter(value!=0)%>%
-  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Preproc. Reads",
-                                        "Taxa Reads", "Taxa (mOTUs)"))%>%
+  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Filtered Reads", "Taxa (mOTUs)"))%>%
   ggplot(aes(x= Year, y= value))+
   geom_violin(alpha= 0.5, trim=F)+
-  geom_point(shape=21, position=position_jitter(0.2), size=2, aes(fill= Seq_batch), color= "black")+
+  geom_point(shape=21, position=position_jitter(0.2), size=1.5, alpha=0.1, aes(fill= Seq_batch), color= "black")+
   scale_fill_manual(values = pal.batch)+
   labs(tag= "b")+
   theme_minimal()+
-  facet_wrap(~measurment,  nrow=4, scales= "free")+
+  facet_wrap(~measurment,  nrow=3, scales= "free")+
   facetted_pos_scales(
-    y = list(measurment %in% c("Total Reads", "Preproc. Reads", "Taxa Reads") ~
+    y = list(measurment %in% c("Total Reads", "Filtered Reads") ~
                scale_y_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
                              labels = scales::trans_format("log10", scales::math_format(10^.x)),
                              guide  = "axis_logticks"),
@@ -310,6 +334,11 @@ sample_data_all_house%>%
   theme(text = element_text(size=16),
         axis.title.x=element_blank(),
         legend.position = "none")-> Supp0B
+
+##Add the median
+Supp0B + stat_summary(fun = median, geom = "point",
+                      size = 3, shape = 21,  fill = "black", color = "black",
+                      position = position_dodge(width = 0.6))-> Supp0B
 
 ##Stats
 sample_data_all_house%>%
@@ -326,19 +355,46 @@ sample_data_all_house%>%
                                   "2015", "2016",
                                   "2017", "2018",
                                   "2019", "2021","2022"))%>%
-  dplyr::select(c(Total_reads, Filtered_reads, Tax_mapped, Seq_batch, observed_mOTUs_rare, Year))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, Year))%>%
   dplyr::rename("Total Reads" = "Total_reads",
-                "Preproc. Reads" = "Filtered_reads",
-                "Taxa Reads" = "Tax_mapped",
+                "Filtered Reads" = "Filtered_reads",
                 "Taxa (mOTUs)" = "observed_mOTUs_rare")%>%
   pivot_longer(!c(Seq_batch, Year), names_to = "measurment", values_to = "value")%>%
-  dplyr::filter(value!=0)%>%
-  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Preproc. Reads",
-                                        "Taxa Reads", "Taxa (mOTUs)"))%>%
+  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads",
+                                        "Filtered Reads", "Taxa (mOTUs)"))%>%
   dplyr::group_by(measurment)%>%
   wilcox_test(value ~ Year, alternative = "two.sided")%>%
   adjust_pvalue(method = "bonferroni")%>%
   add_significance()-> stats.test.year
+
+##Effect size
+sample_data_all_house%>%
+  rownames_to_column("Sample_ID")%>%
+  left_join(alpha.diversity, by= "Sample_ID")%>%
+  left_join(arg.mapped, by= "Sample_ID")%>%
+  dplyr::mutate(arg_str_mapped= replace_na(arg_str_mapped, 0),
+                Filtered_reads= Filtered_reads+1,
+                Tax_mapped= Tax_mapped+1,
+                observed_arg_rtk= replace_na(observed_arg_rtk, 0),
+                observed_arg= replace_na(observed_arg, 0),
+                Year= as.factor(Year),
+                Year= fct_relevel(Year,
+                                  "2015", "2016",
+                                  "2017", "2018",
+                                  "2019", "2021","2022"))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, Year))%>%
+  dplyr::rename("Total Reads" = "Total_reads",
+                "Filtered Reads" = "Filtered_reads",
+                "Taxa (mOTUs)" = "observed_mOTUs_rare")%>%
+  pivot_longer(!c(Seq_batch, Year), names_to = "measurment", values_to = "value")%>%
+  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads",
+                                        "Filtered Reads", "Taxa (mOTUs)"))%>%
+  dplyr::group_by(measurment)%>%
+  wilcox_effsize(value ~ Year, alternative = "two.sided")%>%
+  dplyr::select(c(measurment, group1, group2, effsize, magnitude))%>%
+  left_join(stats.test.year)%>%
+  relocate(c(effsize, magnitude), .after = p.adj.signif)%>%
+  dplyr::select(!`.y.`)->stats.test.year
 
 ##Now for ARGs
 sample_data_all_house%>%
@@ -385,21 +441,25 @@ sample_data_all_house%>%
                             TRUE ~ "low"))%>%
   dplyr::mutate(arg_level= fct_relevel(arg_level,
                                        "high", "low"))%>%
-  ggplot(aes(x= observed_mOTUs_rare, y= observed_arg, color=arg_level))+
-  geom_point(shape=21, alpha= 0.2, position=position_jitter(0.2), size=3, aes(fill= arg_level), color= "black")+
-  labs(tag= "c", x= "Microbial richness", y= "ARG richness")+
-  scale_fill_manual(values = pal.level)+
-  scale_color_manual(values = pal.level)+
+  ggplot(aes(x= Filtered_reads+1, y= observed_arg+1, color=Seq_batch))+
+  geom_point(shape=21, alpha= 0.2, position=position_jitter(0.2), size=3, aes(fill= Seq_batch), color= "black")+
+  labs(tag= "c", x= "Filtered reads", y= "ARG richness")+
+  scale_fill_manual(values = pal.batch)+
+  scale_color_manual(values = pal.batch)+
   coord_cartesian(ylim = c(0, NA))+
   geom_smooth(method = lm, se = T)+
   geom_hline(yintercept = 100, linetype='dotted')+
   scale_y_continuous(limits = c(0, 210))+
+  scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
+                labels = scales::trans_format("log10", scales::math_format(10^.x)),
+                guide  = "axis_logticks")+
   guides(color= "none", size= "none",
          fill= guide_legend(override.aes=list(shape=c(21), size= 3)))+
-  ggpubr::stat_cor(label.y = c(200, 80),  label.x = 3, method = "spearman",
+  ggpubr::stat_cor(label.y = c(200, 80),  label.x = 5, method = "spearman",
                    aes(label= paste("rho","'='", after_stat(r), after_stat(p.label), sep= "~` `~")))+
   geom_rug(col=rgb(.5,0,0,alpha=.2), sides="l")+
   theme_minimal()+
+  facet_wrap(~Year,  ncol=2, scales= "free")+
   theme(text = element_text(size=16),
         legend.position = "none")-> Supp0C
 
