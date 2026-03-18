@@ -178,13 +178,14 @@ pal.year<- c("2015"= "#E64B35FF", "2016"= "#4DBBD5FF",
              "2017"= "#00A087FF", "2018"= "#F39B7FFF",
              "2019"= "#8491B4FF","2021"="#91D1C2FF","2022"= "#B09C85FF")
 
-##ARG diversity by year
+##ARG diversity by year (Main Figure 1)
 sample_data_all_house%>%
   rownames_to_column("Sample_ID")%>%
   left_join(alpha.diversity, by= "Sample_ID")%>%
   left_join(arg.mapped, by= "Sample_ID")%>%
   dplyr::mutate(arg_str_mapped= replace_na(arg_str_mapped, 0),
-                observed_arg= replace_na(observed_arg, 0))%>%
+                observed_arg= replace_na(observed_arg, 0),
+                observed_arg_rtk= replace_na(observed_arg_rtk, 0))%>%
   dplyr::mutate(Year= as.factor(Year))%>%
   dplyr::mutate(Year= fct_relevel(Year,
                                   "2015", "2016",
@@ -204,6 +205,70 @@ sample_data_all_house%>%
         axis.title.x=element_blank(),
         legend.position = "none")-> B
 
+##Statistical analysis
+require("rstatix")
+sample_data_all_house%>%
+  rownames_to_column("Sample_ID")%>%
+  left_join(alpha.diversity, by= "Sample_ID")%>%
+  left_join(arg.mapped, by= "Sample_ID")%>%
+  dplyr::mutate(arg_str_mapped= replace_na(arg_str_mapped, 0),
+                observed_arg= replace_na(observed_arg, 0))%>%
+  dplyr::mutate(Year= as.factor(Year))%>%
+  dplyr::mutate(Year= fct_relevel(Year,
+                                  "2015", "2016",
+                                  "2017", "2018",
+                                  "2019", "2021","2022"))%>%
+  wilcox_test(observed_arg ~ Year, alternative = "two.sided")%>%
+  adjust_pvalue(method = "bonferroni")%>%
+  add_significance()-> stats.test.arg.year
+
+sample_data_all_house%>%
+  rownames_to_column("Sample_ID")%>%
+  left_join(alpha.diversity, by= "Sample_ID")%>%
+  left_join(arg.mapped, by= "Sample_ID")%>%
+  dplyr::mutate(arg_str_mapped= replace_na(arg_str_mapped, 0))%>%
+  dplyr::mutate(Year= as.factor(Year))%>%
+  dplyr::mutate(Year= fct_relevel(Year,
+                                  "2015", "2016",
+                                  "2017", "2018",
+                                  "2019", "2021","2022"))%>%
+  wilcox_effsize(observed_arg ~ Year, alternative = "two.sided")%>%
+  dplyr::select(!c(n1, n2))%>%
+  left_join(stats.test.arg.year)-> stats.test.arg.year ##Table 1
+
+##Year comparisons within batches
+sample_data_all_house%>%
+  rownames_to_column("Sample_ID")%>%
+  left_join(alpha.diversity, by= "Sample_ID")%>%
+  left_join(arg.mapped, by= "Sample_ID")%>%
+  dplyr::mutate(arg_str_mapped= replace_na(arg_str_mapped, 0),
+                observed_arg= replace_na(observed_arg, 0))%>%
+  dplyr::mutate(Year= as.factor(Year))%>%
+  dplyr::mutate(Year= fct_relevel(Year,
+                                  "2015", "2016",
+                                  "2017", "2018",
+                                  "2019", "2021","2022"))%>%
+  dplyr::group_by(Seq_batch)%>%
+  wilcox_test(observed_arg ~ Year, alternative = "two.sided")%>%
+  adjust_pvalue(method = "bonferroni")%>%
+  add_significance()-> stats.test.arg.year.batch
+
+sample_data_all_house%>%
+  rownames_to_column("Sample_ID")%>%
+  left_join(alpha.diversity, by= "Sample_ID")%>%
+  left_join(arg.mapped, by= "Sample_ID")%>%
+  dplyr::mutate(arg_str_mapped= replace_na(arg_str_mapped, 0),
+                observed_arg= replace_na(observed_arg, 0))%>%
+  dplyr::mutate(Year= as.factor(Year))%>%
+  dplyr::mutate(Year= fct_relevel(Year,
+                                  "2015", "2016",
+                                  "2017", "2018",
+                                  "2019", "2021","2022"))%>%
+  dplyr::group_by(Seq_batch)%>%
+  wilcox_effsize(observed_arg ~ Year, alternative = "two.sided")%>%
+  dplyr::select(!c(n1, n2))%>%
+  left_join(stats.test.arg.year.batch)-> stats.test.arg.year.batch ##Supplement table S6
+
 ##Over all batch and sequencing effect
 require("ggh4x")
 sample_data_all_house%>%
@@ -215,28 +280,31 @@ sample_data_all_house%>%
                 Tax_mapped= Tax_mapped+1,
                 observed_arg_rtk= replace_na(observed_arg_rtk, 0),
                 observed_arg= replace_na(observed_arg, 0))%>%
-  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg, observed_arg_rtk))%>%
   dplyr::rename("Total Reads" = "Total_reads",
                 "Filtered Reads" = "Filtered_reads",
                 "Taxa (mOTUs)" = "observed_mOTUs_rare",
-                "ARGs"= "observed_arg")%>%
+                "ARGs"= "observed_arg",
+                "ARGs rare"= "observed_arg_rtk")%>%
   pivot_longer(!Seq_batch, names_to = "measurment", values_to = "value")%>%
   dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Filtered Reads",
-                                        "Taxa (mOTUs)", "ARGs"))%>%
+                                        "Taxa (mOTUs)", "ARGs", "ARGs rare"))%>%
   ggplot(aes(x= Seq_batch, y= value))+
   geom_violin(alpha= 0.5, trim=F)+
   geom_point(shape=21, position=position_jitter(0.2), size=1.5, alpha=0.1, aes(fill= Seq_batch), color= "black")+
   scale_fill_manual(values = pal.batch)+
   labs(tag= "a")+
   theme_minimal()+
-  facet_wrap(~measurment,  ncol=4, scales= "free")+
+  facet_wrap(~measurment,  ncol=5, scales= "free")+
   facetted_pos_scales(
     y = list(measurment %in% c("Total Reads", "Filtered Reads") ~
                scale_y_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
                              labels = scales::trans_format("log10", scales::math_format(10^.x)),
+                             limits = c(10000, 500000000),
                              guide  = "axis_logticks"),
-             measurment %in% c("Taxa (mOTUs)", "ARGs") ~
-               scale_y_continuous(labels = scales::label_number(accuracy = 1))))+
+             measurment %in% c("Taxa (mOTUs)", "ARGs", "ARGs rare") ~
+               scale_y_continuous(labels = scales::label_number(accuracy = 1),
+                                  limits = c(0, 250))))+
   theme(text = element_text(size=16),
         axis.title.x=element_blank(),
         axis.title.y=element_blank(),
@@ -249,7 +317,6 @@ Supp0A + stat_summary(fun = median, geom = "point",
     position = position_dodge(width = 0.6))-> Supp0A
 
 ##Statistical comparison
-require("rstatix")
 sample_data_all_house%>%
   rownames_to_column("Sample_ID")%>%
   left_join(alpha.diversity, by= "Sample_ID")%>%
@@ -259,14 +326,15 @@ sample_data_all_house%>%
                 Tax_mapped= Tax_mapped+1,
                 observed_arg_rtk= replace_na(observed_arg_rtk, 0),
                 observed_arg= replace_na(observed_arg, 0))%>%
-  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg, observed_arg_rtk))%>%
   dplyr::rename("Total Reads" = "Total_reads",
                 "Filtered Reads" = "Filtered_reads",
                 "Taxa (mOTUs)" = "observed_mOTUs_rare",
-                "ARGs"= "observed_arg")%>%
+                "ARGs"= "observed_arg",
+                "ARGs rare"= "observed_arg_rtk")%>%
   pivot_longer(!Seq_batch, names_to = "measurment", values_to = "value")%>%
   dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Filtered Reads",
-                                        "Taxa (mOTUs)", "ARGs"))%>%
+                                        "Taxa (mOTUs)", "ARGs", "ARGs rare"))%>%
   dplyr::group_by(measurment)%>%
   wilcox_test(value ~ Seq_batch, alternative = "two.sided")%>%
   add_significance()-> stats.test.batch
@@ -281,14 +349,15 @@ sample_data_all_house%>%
                 Tax_mapped= Tax_mapped+1,
                 observed_arg_rtk= replace_na(observed_arg_rtk, 0),
                 observed_arg= replace_na(observed_arg, 0))%>%
-  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg, observed_arg_rtk))%>%
   dplyr::rename("Total Reads" = "Total_reads",
                 "Filtered Reads" = "Filtered_reads",
                 "Taxa (mOTUs)" = "observed_mOTUs_rare",
-                "ARGs"= "observed_arg")%>%
+                "ARGs"= "observed_arg",
+                "ARGs rare"= "observed_arg_rtk")%>%
   pivot_longer(!Seq_batch, names_to = "measurment", values_to = "value")%>%
   dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Filtered Reads",
-                                        "Taxa (mOTUs)", "ARGs"))%>%
+                                        "Taxa (mOTUs)", "ARGs", "ARGs rare"))%>%
   dplyr::group_by(measurment)%>%
   wilcox_effsize(value ~ Seq_batch, alternative = "two.sided")%>%
   dplyr::select(c(measurment, effsize, magnitude))%>%
@@ -296,41 +365,29 @@ sample_data_all_house%>%
   relocate(c(effsize, magnitude), .after = p.signif)%>%
   dplyr::select(!`.y.`)->stats.test.batch
 
-##Yearly differences in reads used for taxa and arg, taxa annotated reads and mOTUs
+##Temporal change using rarefied ARG
 sample_data_all_house%>%
   rownames_to_column("Sample_ID")%>%
   left_join(alpha.diversity, by= "Sample_ID")%>%
   left_join(arg.mapped, by= "Sample_ID")%>%
   dplyr::mutate(arg_str_mapped= replace_na(arg_str_mapped, 0),
-                Filtered_reads= Filtered_reads+1,
-                Tax_mapped= Tax_mapped+1,
-                observed_arg_rtk= replace_na(observed_arg_rtk, 0),
                 observed_arg= replace_na(observed_arg, 0),
-                Year= as.factor(Year),
-                Year= fct_relevel(Year,
+                observed_arg_rtk= replace_na(observed_arg_rtk, 0))%>%
+  dplyr::mutate(Year= as.factor(Year))%>%
+  dplyr::mutate(Year= fct_relevel(Year,
                                   "2015", "2016",
                                   "2017", "2018",
                                   "2019", "2021","2022"))%>%
-  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, Year))%>%
-  dplyr::rename("Total Reads" = "Total_reads",
-                "Filtered Reads" = "Filtered_reads",
-                "Taxa (mOTUs)" = "observed_mOTUs_rare")%>%
-  pivot_longer(!c(Seq_batch, Year), names_to = "measurment", values_to = "value")%>%
-  dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads", "Filtered Reads", "Taxa (mOTUs)"))%>%
-  ggplot(aes(x= Year, y= value))+
+  ggplot(aes(x= Year, y= observed_arg_rtk))+
   geom_violin(alpha= 0.5, trim=F)+
-  geom_point(shape=21, position=position_jitter(0.2), size=1.5, alpha=0.1, aes(fill= Seq_batch), color= "black")+
+  geom_point(shape=21, position=position_jitter(0.2), size=2, alpha=0.25, aes(fill= Seq_batch), color= "black")+
   scale_fill_manual(values = pal.batch)+
+  geom_hline(yintercept = 100, linetype='dashed', color= "red")+
+  xlab("Year")+
+  ylab("Number of ARGs")+
   labs(tag= "b")+
+  geom_rug(col=rgb(.5,0,0,alpha=.2), sides="l")+
   theme_minimal()+
-  facet_wrap(~measurment,  nrow=3, scales= "free")+
-  facetted_pos_scales(
-    y = list(measurment %in% c("Total Reads", "Filtered Reads") ~
-               scale_y_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
-                             labels = scales::trans_format("log10", scales::math_format(10^.x)),
-                             guide  = "axis_logticks"),
-             measurment %in% c("Taxa (mOTUs)") ~
-               scale_y_continuous(labels = scales::label_number(accuracy = 1))))+
   theme(text = element_text(size=16),
         axis.title.x=element_blank(),
         legend.position = "none")-> Supp0B
@@ -355,17 +412,18 @@ sample_data_all_house%>%
                                   "2015", "2016",
                                   "2017", "2018",
                                   "2019", "2021","2022"))%>%
-  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, Year))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg_rtk, Year))%>%
   dplyr::rename("Total Reads" = "Total_reads",
                 "Filtered Reads" = "Filtered_reads",
-                "Taxa (mOTUs)" = "observed_mOTUs_rare")%>%
+                "Taxa (mOTUs)" = "observed_mOTUs_rare",
+                "ARG rare" = "observed_arg_rtk")%>%
   pivot_longer(!c(Seq_batch, Year), names_to = "measurment", values_to = "value")%>%
   dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads",
-                                        "Filtered Reads", "Taxa (mOTUs)"))%>%
+                                        "Filtered Reads", "Taxa (mOTUs)", "ARG rare"))%>%
   dplyr::group_by(measurment)%>%
   wilcox_test(value ~ Year, alternative = "two.sided")%>%
   adjust_pvalue(method = "bonferroni")%>%
-  add_significance()-> stats.test.year
+  add_significance()-> stats.test.year ##Supplement table S7
 
 ##Effect size
 sample_data_all_house%>%
@@ -382,21 +440,22 @@ sample_data_all_house%>%
                                   "2015", "2016",
                                   "2017", "2018",
                                   "2019", "2021","2022"))%>%
-  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, Year))%>%
+  dplyr::select(c(Total_reads, Filtered_reads, Seq_batch, observed_mOTUs_rare, observed_arg_rtk, Year))%>%
   dplyr::rename("Total Reads" = "Total_reads",
                 "Filtered Reads" = "Filtered_reads",
-                "Taxa (mOTUs)" = "observed_mOTUs_rare")%>%
+                "Taxa (mOTUs)" = "observed_mOTUs_rare",
+                "ARG rare"= "observed_arg_rtk")%>%
   pivot_longer(!c(Seq_batch, Year), names_to = "measurment", values_to = "value")%>%
   dplyr::mutate(measurment= fct_relevel(measurment, "Total Reads",
-                                        "Filtered Reads", "Taxa (mOTUs)"))%>%
+                                        "Filtered Reads", "Taxa (mOTUs)","ARG rare"))%>%
   dplyr::group_by(measurment)%>%
   wilcox_effsize(value ~ Year, alternative = "two.sided")%>%
   dplyr::select(c(measurment, group1, group2, effsize, magnitude))%>%
   left_join(stats.test.year)%>%
   relocate(c(effsize, magnitude), .after = p.adj.signif)%>%
-  dplyr::select(!`.y.`)->stats.test.year
+  dplyr::select(!`.y.`)->stats.test.year ##Supplement table S7
 
-##Now for ARGs
+##Now for non rarefied ARGs
 sample_data_all_house%>%
   rownames_to_column("Sample_ID")%>%
   left_join(alpha.diversity, by= "Sample_ID")%>%
@@ -425,7 +484,7 @@ sample_data_all_house%>%
   dplyr::select(!c(n1, n2))%>%
   left_join(stats.test.arg.year)-> stats.test.arg.year
 
-##correlation between mOTUs and ARG richness
+##Year comparisons within batches
 sample_data_all_house%>%
   rownames_to_column("Sample_ID")%>%
   left_join(alpha.diversity, by= "Sample_ID")%>%
@@ -436,34 +495,65 @@ sample_data_all_house%>%
                                   "2015", "2016",
                                   "2017", "2018",
                                   "2019", "2021","2022"))%>%
+  dplyr::group_by(Seq_batch)%>%
+  wilcox_test(observed_arg ~ Year, alternative = "two.sided")%>%
+  adjust_pvalue(method = "bonferroni")%>%
+  add_significance()-> stats.test.arg.year.batch
+
+sample_data_all_house%>%
+  rownames_to_column("Sample_ID")%>%
+  left_join(alpha.diversity, by= "Sample_ID")%>%
+  left_join(arg.mapped, by= "Sample_ID")%>%
+  dplyr::mutate(arg_str_mapped= replace_na(arg_str_mapped, 0))%>%
+  dplyr::mutate(Year= as.factor(Year))%>%
+  dplyr::mutate(Year= fct_relevel(Year,
+                                  "2015", "2016",
+                                  "2017", "2018",
+                                  "2019", "2021","2022"))%>%
+  dplyr::group_by(Seq_batch)%>%
+  wilcox_effsize(observed_arg ~ Year, alternative = "two.sided")%>%
+  dplyr::select(!c(n1, n2))%>%
+  left_join(stats.test.arg.year)-> stats.test.arg.year.batch
+
+##correlation between rarefied and non rarefied ARG richness
+sample_data_all_house%>%
+  rownames_to_column("Sample_ID")%>%
+  left_join(alpha.diversity, by= "Sample_ID")%>%
+  left_join(arg.mapped, by= "Sample_ID")%>%
+  dplyr::mutate(arg_str_mapped= replace_na(arg_str_mapped, 0),
+                observed_arg_rtk= replace_na(observed_arg_rtk, 0))%>%
+  dplyr::mutate(Year= as.factor(Year))%>%
+  dplyr::mutate(Year= fct_relevel(Year,
+                                  "2015", "2016",
+                                  "2017", "2018",
+                                  "2019", "2021","2022"))%>%
   dplyr::mutate(arg_level=
                   case_when(observed_arg>=100 ~ "high",
                             TRUE ~ "low"))%>%
   dplyr::mutate(arg_level= fct_relevel(arg_level,
                                        "high", "low"))%>%
-  ggplot(aes(x= Filtered_reads+1, y= observed_arg+1, color=Seq_batch))+
+  ggplot(aes(x= observed_arg, y= observed_arg_rtk, color=Seq_batch))+
   geom_point(shape=21, alpha= 0.2, position=position_jitter(0.2), size=3, aes(fill= Seq_batch), color= "black")+
-  labs(tag= "c", x= "Filtered reads", y= "ARG richness")+
+  labs(tag= "c", x= "ARGs (unrarefied)", y= "ARGs (rarefied)")+
   scale_fill_manual(values = pal.batch)+
   scale_color_manual(values = pal.batch)+
   coord_cartesian(ylim = c(0, NA))+
   geom_smooth(method = lm, se = T)+
   geom_hline(yintercept = 100, linetype='dotted')+
-  scale_y_continuous(limits = c(0, 210))+
-  scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
-                labels = scales::trans_format("log10", scales::math_format(10^.x)),
-                guide  = "axis_logticks")+
+  geom_vline(xintercept = 100, linetype='dotted')+
+  scale_y_continuous(limits = c(0, 150))+
+  scale_x_continuous(limits = c(0, 150))+
   guides(color= "none", size= "none",
          fill= guide_legend(override.aes=list(shape=c(21), size= 3)))+
-  ggpubr::stat_cor(label.y = c(200, 80),  label.x = 5, method = "spearman",
+  ggpubr::stat_cor(label.y = c(120, 120),  label.x = 50, method = "spearman",
                    aes(label= paste("rho","'='", after_stat(r), after_stat(p.label), sep= "~` `~")))+
-  geom_rug(col=rgb(.5,0,0,alpha=.2), sides="l")+
+  geom_rug(col=rgb(.5,0,0,alpha=.2), sides="bl")+
   theme_minimal()+
   facet_wrap(~Year,  ncol=2, scales= "free")+
   theme(text = element_text(size=16),
         legend.position = "none")-> Supp0C
 
-###Check Geographical correlation
+###Check Geographical correlation (only for presentations)
 sample_data_all_house%>%
   rownames_to_column("Sample_ID")%>%
   left_join(alpha.diversity, by= "Sample_ID")%>%
@@ -494,7 +584,7 @@ sample_data_all_house%>%
   geom_rug(col=rgb(.5,0,0, alpha=.2), sides="l")+
   theme_minimal()+
   theme(text = element_text(size=16),
-        legend.position = "none")-> Supp0D
+        legend.position = "none")-> tmp.fig
 
 ##Number of farms
 sample_data_all_house%>%
