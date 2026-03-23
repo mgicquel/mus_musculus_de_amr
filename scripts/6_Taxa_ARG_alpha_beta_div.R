@@ -193,7 +193,7 @@ sample_data_all_house%>%
                                   "2019", "2021","2022"))%>%
   ggplot(aes(x= Year, y= observed_arg))+
   geom_violin(alpha= 0.5, trim=F)+
-  geom_point(shape=21, position=position_jitter(0.2), size=2, aes(fill= Host), color= "black")+
+  geom_point(shape=21, position=position_jitter(0.2), size=2, alpha=0.2,aes(fill= Host), color= "black")+
   scale_fill_manual(values = pal.host)+
   geom_hline(yintercept = 100, linetype='dashed', color= "red")+
   xlab("Year")+
@@ -204,6 +204,11 @@ sample_data_all_house%>%
   theme(text = element_text(size=16),
         axis.title.x=element_blank(),
         legend.position = "none")-> B
+
+##Add the median
+B + stat_summary(fun = median, geom = "point",
+                      size = 3, shape = 21,  fill = "black", color = "black",
+                      position = position_dodge(width = 0.6))-> B
 
 ##Statistical analysis
 require("rstatix")
@@ -528,7 +533,7 @@ sample_data_all_house%>%
                                   "2017", "2018",
                                   "2019", "2021","2022"))%>%
   dplyr::mutate(arg_level=
-                  case_when(observed_arg>=100 ~ "high",
+                  case_when(observed_arg_rtk>=100 ~ "high",
                             TRUE ~ "low"))%>%
   dplyr::mutate(arg_level= fct_relevel(arg_level,
                                        "high", "low"))%>%
@@ -1439,3 +1444,6 @@ Fig2<-ggarrange(A, BC,  ncol = 1, nrow = 2)
 Supp1AB<-ggarrange(Supp1A, Supp1B,  ncol = 2, nrow = 1)
 Supp1C<-ggarrange(Supp1Ca, Supp1Cb, Supp1Cc, ncol = 3, nrow = 1)
 Supp1<-ggarrange(Supp1AB, Supp1C, Supp1D, ncol = 1, nrow = 3)
+
+##Craft the Final supplement for revision
+Supp0<-  ggpubr::ggarrange(Supp0A, Supp0B,  ncol = 1, nrow = 2)
