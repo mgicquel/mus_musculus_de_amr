@@ -914,7 +914,7 @@ data.frame(t(abundances(transform_sample_counts(PS.ARG.FPKM.filt, function(x) 1E
   dplyr::group_by(ARO)%>%
   nest()%>%
   dplyr::mutate(model = map(data, ~ glm(log1p(abundance) ~ arg_level, data = .x, family = gaussian())),
-                results = map(model, tidy))%>%
+                results = map(model, broom::tidy))%>%
   select(ARO, results)%>%
   unnest(results)%>%
   dplyr::filter(term=="arg_levellow")%>%
@@ -969,19 +969,21 @@ pal.abx<-c("tetracycline antibiotic"="#994F00", "glycopeptide antibiotic"="#006C
 
 ##Differential abundance
 require("ggrepel")
+## E. coli relationship
+##Get a volcano plot showing only the E coli genes
 diff.abund.arg.all%>%
   dplyr::filter(padj>0)%>%
   dplyr::mutate(level = case_when(adj.sig=="NS" ~ 0,
-                                  T ~ 1))%>%
-  dplyr::mutate(label= case_when(level==1&!Drug_Class_adjusted %in% c("other", "multidrug")~ ARG_CARD_Short,
-                                 T~ ""))%>%
-  dplyr::mutate(label= case_when(Drug_Class_adjusted!="glycopeptide antibiotic"~ label,
-                                 T~ ""))%>%
-  ggplot(aes(x = estimate, y = -log10(padj), label= label)) +
+                                  T ~ 1),
+                label = case_when(str_detect(ARG_CARD_Short, "Ecol|EC") ~ ARG_CARD_Short,
+                                  TRUE ~ ""))%>%
+  dplyr::mutate(Variant_adjusted= case_when(label!=""~ "Escherichia coli",
+                                            T~ "Other"))%>%
+  ggplot(aes(x = -1*estimate, y = -log10(padj), label= label)) +
   geom_point(aes(fill= Drug_Class_adjusted, size=prevalence*100, alpha=level),
              color="black", shape= 21,) +
   scale_fill_manual(values = pal.abx)+
-  labs(x= expression(High~ARG~level~~phantom(0)~Effect~size~(beta~estimate)~~phantom(0)~Lower~ARG~level),
+  labs(x= expression(Low~ARG~level~~phantom(0)~Effect~size~(beta~estimate)~~phantom(0)~High~ARG~level),
        y= expression(-log[10]~(Q)),
        fill= "Drug class",
        size= "Overall prevalence (%)",
@@ -993,7 +995,104 @@ diff.abund.arg.all%>%
   geom_hline(yintercept=-log10(0.1), col="black", linetype= "dashed") +
   geom_vline(xintercept=0, col="black", linetype= "dashed") +
   theme_minimal()+
-  theme(text = element_text(size=16))-> Supp0a
+  theme(text = element_text(size=16))-> Supp00a
+
+##Get the genes that are more abundant in the high group
+diff.abund.arg.all%>%
+  dplyr::filter(padj>0)%>%
+  dplyr::mutate(level = case_when(adj.sig=="NS" ~ 0,
+                                  T ~ 1),
+                label = case_when(str_detect(ARG_CARD_Short, "Ecol|EC") ~ ARG_CARD_Short,
+                                  TRUE ~ ""))%>%
+  dplyr::filter(label!="")%>%
+  pull(ARO)-> tmp.ec
+
+##Get the number of E coli mutations per sample
+
+##Correlation to E coli abundance
+prev.abund.all.motus%>%
+  dplyr::filter(Species=="Escherichia coli")%>%
+  dplyr::select(c(Sample_ID, mOTU,Species, abundance, prevalence))%>%
+  dplyr::rename(abundance_mOTU=abundance,
+                prevalence_mOTU=prevalence)%>%
+  left_join(prev.abund.aro%>%
+              dplyr::filter(ARO%in%tmp.ec), by= "Sample_ID")%>%
+  left_join(ord.data%>%
+              rownames_to_column("Sample_ID")%>%
+              dplyr::select(c(Sample_ID, arg_level)), by= "Sample_ID")%>%
+  dplyr::mutate(arg_level= fct_relevel(arg_level, "low", "high"))%>%
+  dplyr::filter(abundance>0)%>%
+  dplyr::filter(abundance_mOTU>0)%>%
+  ggplot(aes(x= log2(`abundance_mOTU`), y= log2(abundance), colour = arg_level))+
+  geom_point(shape=21, alpha= 0.1, size=2, aes(fill= arg_level), color= "black")+
+  labs(tag= "c", x= "E. coli abundance", y= "ARGs abundance")+
+  scale_fill_manual(values = pal.level, labels= c("Low", "High"))+
+  scale_color_manual(values = pal.level)+
+  geom_smooth(method = lm, se = T)+
+  ggpubr::stat_cor(label.y = log2(30000000), label.x = c(log2(0.00001),log2(0.004)), method = "spearman",
+                   aes(label= paste("rho","'='", after_stat(r), after_stat(p.label), sep= "~` `~")))+
+  guides(color= "none", size= "none",
+         fill= guide_legend(override.aes=list(shape=c(21), size= 3)))+
+  theme_minimal()+
+  theme(text = element_text(size=16),
+        legend.position = "none")-> Supp00c
+
+##Number of ARGs associated to E.coli detected
+prev.abund.aro%>%
+  dplyr::filter(ARO%in%tmp.ec)%>%
+  dplyr::group_by(Sample_ID)%>%
+  count(abundance>0)%>%
+  dplyr::filter(`abundance > 0`==T)%>%
+  dplyr::select(!`abundance > 0`)%>%
+  dplyr::rename(E_coli_genes=n)%>%
+  left_join(ord.data%>%
+              rownames_to_column("Sample_ID"))%>%
+  dplyr::mutate(arg_level= fct_relevel(arg_level, "low", "high"))%>%
+  ggplot(aes(x= arg_level, y= E_coli_genes))+
+  geom_violin(alpha= 0.5, trim=F)+
+  geom_jitter(shape=21, alpha= 0.2, size=3, aes(fill= arg_level), color= "black")+
+  labs(tag= "b", x= "ARG level", y= "No. of E.coli ARGs")+
+  scale_fill_manual(values = pal.level, labels= c("Low", "High"))+
+  guides(color= "none", size= "none",
+         fill= guide_legend(override.aes=list(shape=c(21), size= 3)))+
+  theme_minimal()+
+  theme(text = element_text(size=16),
+        legend.position = "none") +
+  stat_summary(fun = median, geom = "point",
+                      size = 3, shape = 21,  fill = "black", color = "black",
+                      position = position_dodge(width = 0.6))-> Supp00b
+
+##Statistical test
+prev.abund.aro%>%
+  dplyr::filter(ARO%in%tmp.ec)%>%
+  dplyr::group_by(Sample_ID)%>%
+  count(abundance>0)%>%
+  dplyr::filter(`abundance > 0`==T)%>%
+  dplyr::select(!`abundance > 0`)%>%
+  dplyr::rename(E_coli_genes=n)%>%
+  ungroup()%>%
+  left_join(ord.data%>%
+              rownames_to_column("Sample_ID"))%>%
+  dplyr::mutate(arg_level= fct_relevel(arg_level, "low", "high"))%>%
+  dplyr::select(c(arg_level,E_coli_genes))%>%
+  wilcox_test(E_coli_genes ~ arg_level, alternative = "two.sided")%>%
+  add_significance()-> stats.test.ecoli.arg
+
+prev.abund.aro%>%
+  dplyr::filter(ARO%in%tmp.ec)%>%
+  dplyr::group_by(Sample_ID)%>%
+  count(abundance>0)%>%
+  dplyr::filter(`abundance > 0`==T)%>%
+  dplyr::select(!`abundance > 0`)%>%
+  dplyr::rename(E_coli_genes=n)%>%
+  ungroup()%>%
+  left_join(ord.data%>%
+              rownames_to_column("Sample_ID"))%>%
+  dplyr::mutate(arg_level= fct_relevel(arg_level, "low", "high"))%>%
+  dplyr::select(c(arg_level,E_coli_genes))%>%
+  wilcox_effsize(E_coli_genes ~ arg_level, alternative = "two.sided")%>%
+  dplyr::select(!c(n1, n2))%>%
+  left_join(stats.test.ecoli.arg)-> stats.test.ecoli.arg ##Supplement Figure S6
 
 ##Composition plot by Mechanism, Drug class and genes by year
 ord.data%>%
@@ -1447,3 +1546,6 @@ Supp1<-ggarrange(Supp1AB, Supp1C, Supp1D, ncol = 1, nrow = 3)
 
 ##Craft the Final supplement for revision
 Supp0<-  ggpubr::ggarrange(Supp0A, Supp0B,  ncol = 1, nrow = 2)
+
+Supp00<- ggpubr::ggarrange(Supp00b, Supp00c, ncol = 1, nrow = 2)
+Supp00<- ggpubr::ggarrange(Supp00a, Supp00, ncol = 2, nrow = 1, widths = c(2,1))
