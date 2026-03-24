@@ -1,0 +1,150 @@
+---
+title: "CompareLivestockData"
+author: "Aimara Planillo and Moritz Wenzler-Meya"
+date: "2026-03-24"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Compare livestock data from different years
+
+```{r}
+source("scripts/source_packages.R")
+```
+
+
+### Load data
+
+```{r data}
+data <- read.csv("data/processed/Table_ARG_mice_envcov_100m_202507.csv")
+
+# livestock <- st_read("data/raw/geo/thuenen_livestock/livestock_germany_1999-2020_polygon_04326.gpkg")
+# ## get data to use
+# livestock_filtered <- livestock %>% 
+#   dplyr::select(CATO_2016, CATO_2020,
+#                 PITO_2016, PITO_2020, 
+#                 POTO_2016, POTO_2020, 
+#                 geom)
+# 
+# st_crs(livestock_filtered)
+
+# st_write(livestock_filtered, "./data/processed/geo/livestock_2016vs2020_31467.gpkg")
+
+livestock_filtered <- st_read("./data/processed/geo/livestock_2016vs2020_31467.gpkg")
+```
+
+## get mice points
+```{r}
+head(data)
+
+data_sf <- st_as_sf(data, coords = c("lon", "lat"), crs = 4326) %>% 
+  st_transform(st_crs(livestock))
+```
+
+Livestock units in 1000 GVE; 
+**This value represents the amount of livestock measured in "1000 livestock units" (1000000 units for poultry)**
+As it is standardized, can be directly comparable between regions 
+CATO: Cattle; the sum of all cattle related subclasses
+PITO: Pigs; the sum of all pig related subclasses
+POTO: Poultry; the sum of all poultry related subclasses
+
+
+## extract farm animals in farms
+```{r}
+data_sf_ext <- st_intersection(data_sf, livestock_filtered)
+
+## get info at the farm level
+data_sf_ext_farm <- data_sf_ext %>% 
+  group_by(farm_ID) %>% 
+  summarise(across(CATO_2016:POTO_2020, mean))
+```
+
+
+## comparison pigs: PITO
+```{r}
+cor_pito <- cor(x = data_sf_ext_farm$PITO_2016, 
+                y = data_sf_ext_farm$PITO_2020, 
+                use = "pairwise.complete.obs",
+                method = "pearson")
+max_limit <- max(data_sf_ext_farm$PITO_2016, data_sf_ext_farm$PITO_2020, na.rm = TRUE)
+
+ggplot(data_sf_ext_farm, aes(x=PITO_2016, y=PITO_2020)) +
+  geom_point(col = "steelblue", alpha = 0.50, size = 4, pch = 16) +
+  geom_abline(slope = cor_pito, intercept = 0, col = "grey80", lwd = 2, lty = 4) +
+  # geom_smooth(method=lm , color="red", se=FALSE) + 
+  coord_equal(xlim = c(0, max_limit), ylim = c(0, max_limit)) +
+  labs(title = "Comparison pigs relative abundance 2016 vs 2020",
+       subtitle = paste0("Pearson Correlation = ", round(cor_pito, digits = 4)),
+       x = "Pigs - relative abundance in 2020",
+       y = "Pigs - relative abundance in 2016") +
+  theme_bw() +
+  theme(axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12))
+
+ggsave("figures/comparison_2016_2020/comparison_pigs_2016_vs_2020.jpg", dpi = 300, width = 7, height = 7)
+```
+
+comparison cattle: CATO
+```{r}
+cor_cato <- cor(x = data_sf_ext_farm$CATO_2016, 
+                y = data_sf_ext_farm$CATO_2020, 
+                use = "pairwise.complete.obs",
+                method = "pearson")
+max_limit <- max(data_sf_ext_farm$CATO_2016, data_sf_ext_farm$CATO_2020, na.rm = TRUE)
+
+ggplot(data_sf_ext_farm, aes(x=CATO_2016, y=CATO_2020)) +
+  geom_point(col = "steelblue", alpha = 0.50, size = 4, pch = 16) +
+  geom_abline(slope = cor_cato, intercept = 0, col = "grey80", lwd = 2, lty = 4) +
+  # geom_smooth(method=lm , color="red", se=FALSE) + 
+  coord_equal(xlim = c(0, max_limit), ylim = c(0, max_limit)) +
+  labs(title = "Comparison cattle relative abundance 2016 vs 2020",
+       subtitle = paste0("Pearson Correlation = ", round(cor_cato, digits = 4)),
+       x = "Cattle - relative abundance in 2020",
+       y = "Cattle - relative abundance in 2016") +
+  theme_bw() +
+  theme(axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12))
+
+ggsave("figures/comparison_2016_2020/comparison_cattle_2016_vs_2020.jpg", dpi = 300, width = 7, height = 7)
+```
+
+comparison poultry: POTO
+
+```{r}
+cor_poto <- cor(x = data_sf_ext_farm$POTO_2016, 
+                y = data_sf_ext_farm$POTO_2020, 
+                use = "pairwise.complete.obs",
+                method = "pearson")
+max_limit <- max(data_sf_ext_farm$POTO_2016, data_sf_ext_farm$POTO_2020, na.rm = TRUE)
+
+ggplot(data_sf_ext_farm, aes(x=POTO_2016, y=POTO_2020)) +
+  geom_point(col = "steelblue", alpha = 0.50, size = 4, pch = 16) +
+  geom_abline(slope = cor_poto, intercept = 0, col = "grey80", lwd = 2, lty = 4) +
+  # geom_smooth(method=lm , color="red", se=FALSE) + 
+  coord_equal(xlim = c(0, max_limit), ylim = c(0, max_limit)) +
+  labs(title = "Comparison poultry relative abundance 2016 vs 2020",
+       subtitle = paste0("Pearson Correlation = ", round(cor_poto, digits = 4)),
+       x = "Poultry - relative abundance in 2020",
+       y = "Poultry - relative abundance in 2016") +
+  theme_bw() +
+  theme(axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12))
+
+ggsave("figures/comparison_2016_2020/comparison_poultry_2016_vs_2020.jpg", dpi = 300, width = 7, height = 7)
+```
+
+
+```{r}
+test <- st_read("./data/processed/geo/livestock_germany_2020_vector_3035.gpkg")
+
+
+
+cbind.data.frame(livestock$PITO_2020, test$PITO)
+```
+
+
