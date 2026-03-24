@@ -46,23 +46,30 @@ rgi.arg.data%>%
               values_from = present,
               values_fill = 0)-> arg.contigs
 
-##Get plasmer annotations
-plasmer.prediction.1<- readRDS("data/raw/Plasmid_annotation_contigs_1_VHJD.rds")
-plasmer.prediction.2<- readRDS("data/raw/Plasmid_annotation_contigs_2_VHJD.rds")
+##Get plasmer annotations (Too large for the public repository)
+Local=F
+if(!exists("plasmid.arg.data")){
+  if(isTRUE(Local)){
+    plasmer.prediction.1<- readRDS("data/raw/Plasmid_annotation_contigs_1_VHJD.rds")
+    plasmer.prediction.2<- readRDS("data/raw/Plasmid_annotation_contigs_2_VHJD.rds")
 
-##Check for plasmid contigs with ARGs
-rgi.arg.data%>%
-  dplyr::filter(Best_Identities>=80&Length_of_refseq>=80)%>%
-  dplyr::filter(Batch=="Batch_1")%>%
-  dplyr::mutate(Contig = str_replace(Contig, "_[^_]*$", ""))%>%
-  left_join(by= c("Contig", "Sample_ID"), plasmer.prediction.1)-> tmp
+    ##Check for plasmid contigs with ARGs
+    rgi.arg.data%>%
+      dplyr::filter(Best_Identities>=80&Length_of_refseq>=80)%>%
+      dplyr::filter(Batch=="Batch_1")%>%
+      dplyr::mutate(Contig = str_replace(Contig, "_[^_]*$", ""))%>%
+      left_join(by= c("Contig", "Sample_ID"), plasmer.prediction.1)-> tmp
 
-rgi.arg.data%>%
-  dplyr::filter(Best_Identities>=80&Length_of_refseq>=80)%>%
-  dplyr::filter(Batch=="Batch_2")%>%
-  dplyr::mutate(Contig = str_replace(Contig, "_[^_]*$", ""))%>%
-  left_join(by= c("Contig", "Sample_ID"), plasmer.prediction.2)%>%
-  rbind(tmp)-> plasmid.arg.data
+    rgi.arg.data%>%
+      dplyr::filter(Best_Identities>=80&Length_of_refseq>=80)%>%
+      dplyr::filter(Batch=="Batch_2")%>%
+      dplyr::mutate(Contig = str_replace(Contig, "_[^_]*$", ""))%>%
+      left_join(by= c("Contig", "Sample_ID"), plasmer.prediction.2)%>%
+      rbind(tmp)-> plasmid.arg.data
+  } else {
+    plasmid.arg.data<- readRDS(file = "data/processed/plasmid.arg.data.rds")
+  }
+}
 
 ##Get only those genes that were detected in plasmids
 plasmid.arg.data%>%
@@ -94,9 +101,8 @@ plasmid.arg.data%>%
   scale_fill_manual(values= pal.abx)+
   theme_minimal()+
   facet_grid(~Prediction)+
-  guides(fill=guide_legend(nrow=4, byrow=TRUE, alpha=1))+
+  guides(fill=guide_legend(nrow=4, byrow=TRUE))+
   theme(text = element_text(size=16), legend.position="bottom")-> Supp00A
-
 
 plasmid.arg.data%>%
   dplyr::filter(Prediction=="plasmid")%>%
@@ -165,7 +171,7 @@ arg.contigs.norm%>%
   dplyr::filter(ARO%in%tmp$ARO)%>%
   left_join(tmp, by = "ARO")%>%
   dplyr::mutate(Best_Hit_ARO= fct_reorder(Best_Hit_ARO, proportion))%>%
-  ggplot(aes(x= log10(mean_reads), y= Best_Hit_ARO))+
+  ggplot(aes(x= log2(mean_fpkm), y= Best_Hit_ARO))+
   geom_bar(stat="identity", fill="#f68060", alpha=.6, width=.4) +
   labs(x = "Abundance", tag = "  ")+
   theme_minimal()+
@@ -174,6 +180,5 @@ arg.contigs.norm%>%
         axis.title.y = element_blank())->Supp00B.2
 
 ##Merge two figures
-Supp00B<-ggarrange(Supp00B.1, Supp00B.2,  ncol = 2, nrow = 1, widths = c(5, 1))
-
-
+Supp00B<-ggpubr::ggarrange(Supp00B.1, Supp00B.2,  ncol = 2, nrow = 1, widths = c(5, 1))
+Supp00<-ggarrange(Supp00A, Supp00B,  ncol = 1, nrow = 2)
