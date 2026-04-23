@@ -1,0 +1,24 @@
+# General Description
+
+This directory contains code snippets of all the scripts required to preprocess raw sequencing data, perform read-based taxonomic and ARG annotation, and generate the data found in the data/raw directory. A detailed description of each file can be found below.
+
+## NGLess
+
+### 00_Preprocessing_raw_sequences.ngl
+This script specifies the parameters necessary to preprocess paired-end raw sequencing data files from each sample. The raw data should be in an individual directory for each sample. Additional reference genomes from Homo sapiens and Mus musculus should be available in the system.
+
+Note: This script can be run as a Slurm batch array. 
+
+### 01_Taxonomic_annotation_mOTUs.ngl
+This script maps the preprocessed reads to the marker gene database from mOTUs. The mapping results per sample are then used to generate a count matrix by taxonomic level.
+
+Note: This script can be run as a Slurm batch array. 
+
+## Shell
+
+### 02_ARG_annotation_RGI.sh
+This script generates gene_mapping_data.txt files for each sample with ARG annotations by mapping preprocessed reads to CARD. 
+
+Note: This script should be run from the project directory where ./preprocessed is located.
+
+
