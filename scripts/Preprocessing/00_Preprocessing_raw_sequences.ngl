@@ -1,0 +1,74 @@
+ngless "1.5"
+import "mocat" version "2.0.1"
+import "parallel" version "1.1"
+
+# Author: Víctor Hugo Jarquín Díaz
+# Group: AG Forslund
+# Aim: Script for preprocessing of raw reads using NGLess
+# Location/date: MDC - 01.2024
+
+#1) Each sample should correspond to one directory
+#2) Paired-end reads are assumed to be split into two files
+#3) File names should match with .1/.2 appended or _1/_2
+
+##Define the list of samples to include in the array
+samples = readlines('samples_list.txt')
+current = lock1(samples)
+input = load_fastq_directory("seqdata"</>current)
+
+#different result outputdirs not necessary anymore, since all results will be "collected" in one output with the collect function
+
+RESULTS = current
+
+#quality control
+write(qcstats({fastq}), ofile= 'fqrawstats.txt')
+
+##Remove first 6b and trim at minimum quality of 25
+qc_reads = preprocess(input, keep_singles=False) using |read|:
+    read = read[6:]
+    read = substrim(read, min_quality=25)
+    if len(read) < 45:
+        discard
+
+#Filter reads from human reference (contamination)
+human_mapped = map(qc_reads, fafile='../references/HG38.p14.fa')
+
+collect(count(human_mapped, features=['seqname']),
+        current=current,
+        allneeded=samples,
+        ofile= 'preprocessed/filter_human.txt')
+
+non_human = select(human_mapped) using |mr|:
+    mr = mr.filter(min_match_size=45, min_identity_pc=90, action={unmatch})
+    if mr.flag({mapped}):
+        discard
+
+# save non-human reads
+non_human_reads = as_reads(non_human)
+
+#Filter reads from mouse reference (host)
+mouse_mapped = map(non_human_reads, fafile='../references/Mouse39.fa')
+
+collect(count(mouse_mapped, features=['seqname']),
+        current=current,
+        allneeded=samples,
+        ofile= 'preprocessed/filter_mouse_HMHZ_2.txt')
+        
+
+# save host clean reads
+non_mouse = select(mouse_mapped) using |mr|:
+    mr = mr.filter(min_match_size=45, min_identity_pc=90, action={unmatch})
+    if mr.flag({mapped}):
+        discard
+
+non_mouse_reads = as_reads(non_mouse)
+write(non_mouse_reads, ofile= 'preprocessed'</>RESULTS+'_filtered_reads.fq.gz')
+
+# save mouse reads
+mouse = select(mouse_mapped) using |mr|:
+    mr = mr.filter(min_match_size=45, min_identity_pc=90, action={unmatch})
+    if mr.flag({unmapped}):
+        discard
+
+mouse_reads = as_reads(mouse)
+write(mouse_reads, ofile= 'mouse_reads'</>RESULTS+'_mouse_reads.fq.gz')

@@ -1,0 +1,86 @@
+ngless "1.5"
+local import "motus" version "3.1"
+import "parallel" version "1.0"
+
+# Author: Víctor Hugo Jarquín Díaz
+# Group: AG Forslund
+# Aim: Script for taxonomic annotation using mOTUs
+# Location/date: MDC - 01.2024
+
+###Script should be submitted from working directory (eg. ../data/HMHZ_Shotgun/)
+###All preprocessed reads are in the same directory ./preprocessed
+###1) Prepare a list with all the sample IDs  that should be used 
+#ls preprocessed/*|head
+### Take the code before filtered_reads.pair.1.fq.gz/filtered_reads.pair.2.fq.gz
+
+samples = readlines('sample_list.txt')
+current = lock1(samples)
+input = paired('preprocessed/'+current+'_filtered_reads.pair.1.fq.gz', 'preprocessed/'+current+'_filtered_reads.pair.2.fq.gz')
+
+##Generate abundance tables for each taxonomic level
+
+##Strain
+count = motus(input,
+              sample=current,
+              relative_abundance=false)
+
+collect(count,
+        current=current,
+        allneeded=samples,
+        ofile='motusv3.1.tsv')
+
+##Genus
+count = motus(input,
+              taxonomic_level={genus},
+              sample=current,
+              relative_abundance=false)
+
+collect(count,
+        current=current,
+        allneeded=samples,
+        ofile='genus.tsv')
+
+##Family
+count = motus(input,
+              taxonomic_level={family},
+              sample=current,
+              relative_abundance=false)
+
+collect(count,
+        current=current,
+        allneeded=samples,
+        ofile='family.tsv')
+
+##Order
+count = motus(input,
+              taxonomic_level={order},
+              sample=current,
+              relative_abundance=false)
+
+collect(count,
+        current=current,
+        allneeded=samples,
+        ofile='order.tsv')
+
+##Class
+count = motus(input,
+              taxonomic_level={class},
+              sample=current,
+              relative_abundance=false)
+
+collect(count,
+        current=current,
+        allneeded=samples,
+        ofile='class.tsv')
+
+##Phylum
+count = motus(input,
+              taxonomic_level={phylum},
+              sample=current,
+              relative_abundance=false)
+
+collect(count,
+        current=current,
+        allneeded=samples,
+        ofile='phylum.tsv')
+
