@@ -1,6 +1,6 @@
 ---
 title: "ARGs in mice gut microbiome - MAPs"
-subtitle: "Morgane Gicquel"
+authors: "Morgane Gicquel, Aimara Planillo"
 date: "2025-10-10"
 output:
   officedown::rdocx_document:
@@ -28,12 +28,8 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
 ```
 
 ```{r prepare workspace}
-setwd("D:/PopDynCloud/Projects/mus_musculus_de_amr_gicquel_m")
-wrkdir <- getwd()
-
 source("scripts/source_packages.R")
 source("scripts/source_themes_mg.R")
-source("scripts/source_api.R")
 
 output_wd <- here("output")
 
@@ -103,22 +99,43 @@ sample_sf <- st_transform(sample_sf, crs = 3035)
 # MAP
 
 ```{r layers}
+# Europe
+library(rnaturalearth)
+library(sf)
 
-# Background map
+europe <- ne_countries(continent="Europe", returnclass="sf", scale="medium")
 
-map <- get_googlemap("Germany", zoom = 6, maptype = "terrain")
-#map <- get_stadiamap(bbox = c(left = 7, bottom = 47, right = 15, top = 55), zoom = 8, maptype = "stamen_toner_lite")
+sf_use_s2(FALSE)
+st_as_sf(rworldmap::getMap(resolution = "low")) %>% 
+  st_transform(crs = st_crs(europe)) %>% 
+  st_buffer(dist = 0) %>% 
+  dplyr::select(ISO_A2, SOVEREIGNT, LON, continent) %>% 
+  mutate(area = st_area(.))-> sf_world
 
-germany_map <- get_stadiamap(bbox = c(left = 9, bottom = 48, right = 15, top = 54),
-                             zoom = 6, maptype = "stamen_terrain")
+ggplot(europe) +
+  geom_sf(fill = "grey80", color = "grey96", lwd = .1) +
+  geom_sf_text(
+    data = filter(sf_world, ISO_A2 %in% c("DE", "SE", "FR", "PL", "CZ", "IT", "ES", "AT", "CH", "GB", "PT", "NL", "BE", "IS")),
+    aes(label = ISO_A2),
+    family = "Open Sans", color = "grey40", fontface = "bold", size = 4.5) +
+  ggspatial::annotation_scale(location = 'tr', text_family = "Open Sans", text_cex = 1.2) +
+  coord_sf(xlim = c(-25, 25), ylim = c(35, 68)) +
+  scale_x_continuous(expand = c(0, 0), breaks = seq(-10, 30, by = 10)) +
+  labs(x = NULL, y = NULL) +
+  theme(panel.ontop = FALSE,
+        panel.grid.major = element_line(color = "grey75", linetype = "15", linewidth = .3))-> map_europe ## manual adjustment
 
 # Region
 
-region <- st_read("./data/processed/geo/germany_3035.gpkg") %>%
-  rename(region_lab = GEN) %>%
-  mutate(region_lab = case_when(region_lab == "Bayern" ~ "Bavaria",
-                                .default = as.character(region_lab)))
+de_states <- ne_states(country = "Germany", returnclass = "sf")
+plot(st_geometry(states))
 
+region <- de_states <- ne_states(country = "Germany", returnclass = "sf") %>% 
+  dplyr::select(region_lab = name) %>% 
+  mutate(region_lab = case_when(region_lab == "Bayern" ~ "Bavaria",
+                                .default = as.character(region_lab))) %>% 
+  st_transform(3035)
+  
 
 # Municipality
 
@@ -190,8 +207,6 @@ cities_sf_ne_3035 <- st_intersection(cities_sf_3035, bbox_ne_3035)
 
 cities_sf_s_3035 <- st_intersection(cities_sf_3035, bbox_s_3035)
 
-
-
 ```
 
 ```{r}
@@ -220,7 +235,7 @@ MAP <- ggplot() +
     width = unit(0.2, "in"),
     style = north_arrow_orienteering
   ) +
-  guides(fill = F) +
+  guides(fill = "none") +
   labs(y = "Latitude", x = "Longitude", colour = "Number of\ncaptured mice:") +
   theme_mg_map() +
   theme(legend.position = "right",
@@ -286,7 +301,7 @@ MAP_combined <- plot_grid(MAP + theme_void() + theme(legend.position = "none"),
                           MAP_S,
                           align = "tbrl")
 
-MAP_combined 
+MAP_combined  
 
 # Save map as PNG
 
